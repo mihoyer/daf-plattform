@@ -12,7 +12,7 @@ from reportlab.platypus import (
     HRFlowable, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
 )
 
-from app.models.database import AnalyseSession, CEFRNiveau, ModulStatus, ModulTyp
+from app.models.database import TestSession, CEFRNiveau, ModulStatus, ModulTyp
 
 # Farben
 DUNKELBLAU = colors.HexColor("#1a2744")
@@ -40,7 +40,7 @@ MODUL_NAMEN = {
 }
 
 
-async def erstelle_pdf(sess: AnalyseSession) -> bytes:
+async def erstelle_pdf(sess: TestSession) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
