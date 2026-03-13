@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.database import (
     CEFRNiveau, GutscheinCode, Hilfssprache, ModulErgebnis, ModulStatus,
-    ModulTyp, PAKET_MODULE, PaketTyp, SessionStatus, ZahlungsStatus, get_db,
+    ModulTyp, PAKET_MODULE, PaketTyp, SessionStatus, TestSession, ZahlungsStatus, get_db,
 )
 from app.services import m1_service, m2_service, m3_service, openai_service, session_service, stripe_service
 

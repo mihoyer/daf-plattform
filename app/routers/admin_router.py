@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.models.database import AnalyseSession, ModulErgebnis, ModulStatus, SessionStatus, get_db
+from app.models.database import TestSession, ModulErgebnis, ModulStatus, SessionStatus, get_db
 from app.services.session_service import lade_session
 
 router = APIRouter(prefix="/api/admin")
@@ -55,14 +55,14 @@ async def liste_sessions(
     _prüfe_admin(request)
     offset = (seite - 1) * limit
 
-    query = select(AnalyseSession).options(selectinload(AnalyseSession.module)).order_by(desc(AnalyseSession.erstellt_am))
+    query = select(TestSession).options(selectinload(TestSession.module)).order_by(desc(TestSession.erstellt_am))
     if status:
-        query = query.where(AnalyseSession.status == status)
+        query = query.where(TestSession.status == status)
 
     result = await db.execute(query.offset(offset).limit(limit))
     sessions = result.scalars().all()
 
-    count_result = await db.execute(select(func.count(AnalyseSession.id)))
+    count_result = await db.execute(select(func.count(TestSession.id)))
     total = count_result.scalar()
 
     return {
@@ -101,16 +101,16 @@ async def session_detail(token: str, request: Request, db: AsyncSession = Depend
 async def statistik(request: Request, db: AsyncSession = Depends(get_db)):
     _prüfe_admin(request)
 
-    total_result = await db.execute(select(func.count(AnalyseSession.id)))
+    total_result = await db.execute(select(func.count(TestSession.id)))
     total = total_result.scalar()
 
     abgeschlossen_result = await db.execute(
-        select(func.count(AnalyseSession.id)).where(AnalyseSession.status == SessionStatus.abgeschlossen)
+        select(func.count(TestSession.id)).where(TestSession.status == SessionStatus.abgeschlossen)
     )
     abgeschlossen = abgeschlossen_result.scalar()
 
     avg_result = await db.execute(
-        select(func.avg(AnalyseSession.gesamt_score)).where(AnalyseSession.gesamt_score.isnot(None))
+        select(func.avg(TestSession.gesamt_score)).where(TestSession.gesamt_score.isnot(None))
     )
     avg_score = avg_result.scalar()
 
@@ -132,7 +132,7 @@ async def loesche_session(token: str, request: Request, db: AsyncSession = Depen
     return {"status": "gelöscht"}
 
 
-def _session_summary(sess: AnalyseSession) -> dict:
+def _session_summary(sess: TestSession) -> dict:
     return {
         "token": sess.token,
         "paket": sess.paket.value,
