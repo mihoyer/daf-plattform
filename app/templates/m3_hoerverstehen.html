@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M3 Hörverstehen – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <div class="badge badge-primary">🎧 M3 – Hörverstehen</div>
+  </div>
+</nav>
+
+<div class="container-sm" style="padding-top:2rem; padding-bottom:4rem;">
+  <div id="lade-bereich" class="text-center" style="padding:4rem 0;">
+    <div class="spinner" style="margin:0 auto 1rem;"></div>
+    <p class="text-muted">Hörtext wird generiert…</p>
+  </div>
+
+  <div id="aufgabe-bereich" class="hidden">
+    <div class="card mb-6" style="background:var(--primary-lighter);">
+      <h2 class="mb-1">Hörverstehen</h2>
+      <p class="text-sm text-muted">Höre den Text aufmerksam an und beantworte die Fragen.</p>
+    </div>
+
+    <!-- Audio-Player -->
+    <div class="card mb-6">
+      <h4 class="mb-3">Hörtext</h4>
+      <audio id="audio-player" controls style="width:100%;" preload="auto"></audio>
+      <p class="text-xs text-muted mt-2">Du kannst den Text mehrmals anhören.</p>
+    </div>
+
+    <!-- Fragen (erst nach erstem Anhören sichtbar) -->
+    <div id="fragen-bereich" class="hidden">
+      <h3 class="mb-4">Verständnisfragen</h3>
+      <div id="fragen-liste"></div>
+      <button class="btn btn-primary mt-4" id="btn-auswerten" onclick="auswerten()" disabled>Auswerten →</button>
+    </div>
+
+    <div id="hinweis-bereich" class="alert alert-info">
+      <span class="alert-icon">💡</span>
+      <div class="text-sm">Höre den Text zuerst vollständig an. Die Fragen erscheinen danach automatisch.</div>
+    </div>
+  </div>
+
+  <div id="analyse-overlay" class="analyse-overlay hidden">
+    <div class="analyse-card">
+      <div class="spinner"></div>
+      <h3>Auswertung läuft…</h3>
+    </div>
+  </div>
+</div>
+
+<script>
+const token = '{{ token }}';
+let fragen = [];
+let antworten = {};
+let audioGespielt = false;
+
+async function ladeAufgabe() {
+  try {
+    const res = await fetch(`/api/m3/aufgabe/${token}`);
+    const data = await res.json();
+    const player = document.getElementById('audio-player');
+    player.src = data.audio_url;
+    fragen = data.fragen;
+    player.addEventListener('ended', () => {
+      if (!audioGespielt) {
+        audioGespielt = true;
+        document.getElementById('hinweis-bereich').classList.add('hidden');
+        zeigeFragen();
+        document.getElementById('fragen-bereich').classList.remove('hidden');
+      }
+    });
+    document.getElementById('lade-bereich').classList.add('hidden');
+    document.getElementById('aufgabe-bereich').classList.remove('hidden');
+  } catch (e) {
+    document.getElementById('lade-bereich').innerHTML = '<p class="text-muted">Fehler beim Laden.</p>';
+  }
+}
+
+function zeigeFragen() {
+  const container = document.getElementById('fragen-liste');
+  fragen.forEach((f, i) => {
+    const div = document.createElement('div');
+    div.className = 'card mb-4';
+    div.innerHTML = `
+      <div class="text-xs text-muted mb-2">Frage ${i+1}</div>
+      <h4 class="mb-3">${f.frage}</h4>
+      ${f.optionen.map((opt, j) => `
+        <label class="mc-option" onclick="waehleAntwort(${i}, ${j})">
+          <input type="radio" name="frage_${i}" value="${j}"> ${opt}
+        </label>
+      `).join('')}
+    `;
+    container.appendChild(div);
+  });
+}
+
+function waehleAntwort(frageIndex, optionIndex) {
+  antworten[frageIndex] = optionIndex;
+  document.querySelectorAll(`[name="frage_${frageIndex}"]`).forEach((el, j) => {
+    el.closest('.mc-option').classList.toggle('selected', j === optionIndex);
+  });
+  const allBeantwortet = fragen.every((_, i) => antworten[i] !== undefined);
+  document.getElementById('btn-auswerten').disabled = !allBeantwortet;
+}
+
+async function auswerten() {
+  document.getElementById('analyse-overlay').classList.remove('hidden');
+  const payload = fragen.map((f, i) => ({ aufgabe_id: f.id, antwort_index: antworten[i] ?? -1 }));
+  try {
+    const res = await fetch(`/api/m3/auswerten/${token}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ antworten: payload }),
+    });
+    const data = await res.json();
+    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+  } catch (e) {
+    document.getElementById('analyse-overlay').classList.add('hidden');
+    alert('Fehler bei der Auswertung.');
+  }
+}
+
+ladeAufgabe();
+</script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M6 Schreiben – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <div class="badge badge-primary">✍️ M6 – Schreiben</div>
+  </div>
+</nav>
+
+<div class="container-sm" style="padding-top:2rem; padding-bottom:4rem;">
+  <div id="lade-bereich" class="text-center" style="padding:4rem 0;">
+    <div class="spinner" style="margin:0 auto 1rem;"></div>
+    <p class="text-muted">Aufgabe wird vorbereitet…</p>
+  </div>
+
+  <div id="aufgabe-bereich" class="hidden">
+    <div class="card mb-6" style="background:var(--primary-lighter);">
+      <h2 class="mb-1">Schreiben</h2>
+      <p class="text-sm text-muted" id="aufgabe-anweisung">–</p>
+    </div>
+
+    <!-- Aufgabentext -->
+    <div class="card mb-6">
+      <h4 class="mb-2" id="aufgabe-titel">–</h4>
+      <div id="aufgabe-beschreibung" class="text-sm text-muted"></div>
+    </div>
+
+    <!-- Eingabe-Modus -->
+    <div class="card mb-6">
+      <h4 class="mb-3">Eingabemethode</h4>
+      <div class="modus-toggle">
+        <button class="modus-btn active" id="btn-text" onclick="setEingabe('text')">⌨️ Texteingabe</button>
+        <button class="modus-btn" id="btn-foto" onclick="setEingabe('foto')">📷 Handschrift-Foto</button>
+      </div>
+
+      <!-- Texteingabe -->
+      <div id="eingabe-text" class="mt-4">
+        <textarea id="text-eingabe" placeholder="Schreibe hier deinen Text…"
+          style="width:100%; min-height:200px; padding:1rem; border:1.5px solid var(--gray-200); border-radius:var(--radius); font-size:1rem; font-family:inherit; resize:vertical; outline:none; transition:var(--transition);"
+          oninput="aktualisiereZaehler()"></textarea>
+        <div class="flex justify-between mt-2">
+          <span class="text-xs text-muted" id="wort-zaehler">0 Wörter</span>
+          <span class="text-xs text-muted">Mindestens 80 Wörter empfohlen</span>
+        </div>
+      </div>
+
+      <!-- Foto-Upload -->
+      <div id="eingabe-foto" class="hidden mt-4">
+        <div id="foto-dropzone" class="foto-dropzone" onclick="document.getElementById('foto-input').click()">
+          <div style="font-size:2.5rem; margin-bottom:.75rem;">📷</div>
+          <p class="font-bold">Foto hochladen oder aufnehmen</p>
+          <p class="text-sm text-muted mt-1">Klicke hier oder ziehe ein Bild hierher</p>
+          <p class="text-xs text-muted mt-2">JPG, PNG · Max. 10 MB · Wird nach Analyse gelöscht</p>
+        </div>
+        <input type="file" id="foto-input" accept="image/*" capture="environment" class="hidden" onchange="zeigeFotoPreview(event)">
+        <div id="foto-preview" class="hidden mt-4">
+          <img id="foto-bild" style="max-width:100%; border-radius:var(--radius); border:1px solid var(--gray-200);">
+          <button class="btn btn-outline btn-sm mt-2" onclick="entferneFoto()">🗑️ Foto entfernen</button>
+        </div>
+        <div class="alert alert-info mt-3">
+          <span class="alert-icon">🔒</span>
+          <div class="text-sm">Das Foto wird ausschließlich zur Texterkennung verwendet und danach <strong>sofort gelöscht</strong>. Es wird nicht gespeichert.</div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-lg w-full" id="btn-analysieren" onclick="sendeEingabe()">Analysieren →</button>
+  </div>
+
+  <div id="analyse-overlay" class="analyse-overlay hidden">
+    <div class="analyse-card">
+      <div class="spinner"></div>
+      <h3 id="analyse-titel">Text wird analysiert…</h3>
+      <p class="text-muted mt-2" id="analyse-info">Grammatik, Kohärenz, Rechtschreibung und Stil werden bewertet.</p>
+    </div>
+  </div>
+</div>
+
+<style>
+.foto-dropzone {
+  border: 2px dashed var(--gray-300); border-radius: var(--radius); padding: 2.5rem;
+  text-align: center; cursor: pointer; transition: var(--transition);
+}
+.foto-dropzone:hover { border-color: var(--primary-light); background: var(--primary-lighter); }
+</style>
+
+<script>
+const token = '{{ token }}';
+let eingabeModus = 'text';
+let fotoFile = null;
+let aufgabeId = null;
+
+async function ladeAufgabe() {
+  try {
+    const res = await fetch(`/api/m6/aufgabe/${token}`);
+    const data = await res.json();
+    aufgabeId = data.aufgabe_id;
+    document.getElementById('aufgabe-anweisung').textContent = data.anweisung || 'Schreibe einen Text zur folgenden Aufgabe.';
+    document.getElementById('aufgabe-titel').textContent = data.titel || 'Schreibaufgabe';
+    document.getElementById('aufgabe-beschreibung').textContent = data.beschreibung || '';
+    document.getElementById('lade-bereich').classList.add('hidden');
+    document.getElementById('aufgabe-bereich').classList.remove('hidden');
+  } catch (e) {
+    document.getElementById('lade-bereich').innerHTML = '<p class="text-muted">Fehler beim Laden.</p>';
+  }
+}
+
+function setEingabe(modus) {
+  eingabeModus = modus;
+  document.getElementById('btn-text').classList.toggle('active', modus === 'text');
+  document.getElementById('btn-foto').classList.toggle('active', modus === 'foto');
+  document.getElementById('eingabe-text').classList.toggle('hidden', modus !== 'text');
+  document.getElementById('eingabe-foto').classList.toggle('hidden', modus !== 'foto');
+}
+
+function aktualisiereZaehler() {
+  const text = document.getElementById('text-eingabe').value.trim();
+  const woerter = text ? text.split(/\s+/).length : 0;
+  document.getElementById('wort-zaehler').textContent = `${woerter} Wörter`;
+}
+
+function zeigeFotoPreview(event) {
+  fotoFile = event.target.files[0];
+  if (!fotoFile) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('foto-bild').src = e.target.result;
+    document.getElementById('foto-preview').classList.remove('hidden');
+    document.getElementById('foto-dropzone').classList.add('hidden');
+  };
+  reader.readAsDataURL(fotoFile);
+}
+
+function entferneFoto() {
+  fotoFile = null;
+  document.getElementById('foto-preview').classList.add('hidden');
+  document.getElementById('foto-dropzone').classList.remove('hidden');
+  document.getElementById('foto-input').value = '';
+}
+
+async function sendeEingabe() {
+  document.getElementById('analyse-overlay').classList.remove('hidden');
+  if (eingabeModus === 'foto') {
+    document.getElementById('analyse-titel').textContent = 'Handschrift wird erkannt…';
+    document.getElementById('analyse-info').textContent = 'GPT-4o liest deine Handschrift und analysiert den Text.';
+  }
+
+  const formData = new FormData();
+  formData.append('modus', eingabeModus);
+  formData.append('aufgabe_id', aufgabeId || '');
+
+  if (eingabeModus === 'text') {
+    const text = document.getElementById('text-eingabe').value.trim();
+    if (!text || text.split(/\s+/).length < 10) {
+      document.getElementById('analyse-overlay').classList.add('hidden');
+      alert('Bitte schreibe mindestens 10 Wörter.');
+      return;
+    }
+    formData.append('text', text);
+  } else {
+    if (!fotoFile) {
+      document.getElementById('analyse-overlay').classList.add('hidden');
+      alert('Bitte lade ein Foto deines Textes hoch.');
+      return;
+    }
+    formData.append('foto', fotoFile, 'handschrift.jpg');
+  }
+
+  try {
+    const res = await fetch(`/api/m6/analysieren/${token}`, { method: 'POST', body: formData });
+    const data = await res.json();
+    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+  } catch (e) {
+    document.getElementById('analyse-overlay').classList.add('hidden');
+    alert('Analysefehler. Bitte versuche es erneut.');
+  }
+}
+
+// Drag & Drop
+const dropzone = document.getElementById('foto-dropzone');
+if (dropzone) {
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.style.background = 'var(--primary-lighter)'; });
+  dropzone.addEventListener('dragleave', () => { dropzone.style.background = ''; });
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.style.background = '';
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) {
+      fotoFile = file;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        document.getElementById('foto-bild').src = ev.target.result;
+        document.getElementById('foto-preview').classList.remove('hidden');
+        dropzone.classList.add('hidden');
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+ladeAufgabe();
+</script>
+</body>
+</html>

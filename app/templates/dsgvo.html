@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Datenschutzerklärung – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+  </div>
+</nav>
+
+<div class="container-sm" style="padding-top:3rem; padding-bottom:5rem;">
+  <h1 class="mb-2">Datenschutzerklärung</h1>
+  <p class="text-muted mb-8">Stand: {{ datum }}</p>
+
+  <div class="card mb-6" style="border-left:4px solid var(--primary-light);">
+    <div class="flex gap-3 items-center mb-3">
+      <span style="font-size:1.5rem;">🔒</span>
+      <h3>Kurzfassung: Privacy by Design</h3>
+    </div>
+    <p class="text-sm">Diese Plattform wurde nach dem Prinzip <strong>Privacy by Design</strong> entwickelt.
+    Es werden <strong>keine personenbezogenen Daten</strong> erfasst, gespeichert oder weitergegeben.
+    Alle Analysen erfolgen vollständig anonym. Audio- und Bilddateien werden ausschließlich zur
+    KI-Analyse übertragen und danach <strong>sofort automatisch gelöscht</strong>.</p>
+  </div>
+
+  <h2 class="mt-8 mb-4">1. Verantwortliche Stelle</h2>
+  <p>Verantwortlich für den Betrieb dieser Plattform im Sinne der DSGVO ist:</p>
+  <div class="card mt-3" id="impressum">
+    <p><strong>{{ betreiber_name }}</strong><br>
+    {{ betreiber_adresse }}<br>
+    E-Mail: {{ betreiber_email }}</p>
+  </div>
+
+  <h2 class="mt-8 mb-4">2. Grundsätze der Datenverarbeitung</h2>
+  <p>Wir verarbeiten personenbezogene Daten nur, soweit dies für die Bereitstellung des Dienstes
+  unbedingt erforderlich ist, und halten uns dabei an folgende Grundsätze:</p>
+  <ul style="margin-top:.75rem; padding-left:1.5rem; display:flex; flex-direction:column; gap:.4rem;">
+    <li><strong>Anonymität:</strong> Es werden keine Namen, E-Mail-Adressen oder sonstigen Identifikationsmerkmale erfasst.</li>
+    <li><strong>Datensparsamkeit:</strong> Es werden nur die Daten verarbeitet, die für die Sprachanalyse zwingend notwendig sind.</li>
+    <li><strong>Zweckbindung:</strong> Alle Daten werden ausschließlich für den angegebenen Zweck (Sprachstandsanalyse) verwendet.</li>
+    <li><strong>Automatische Löschung:</strong> Audio- und Bilddateien werden nach der Analyse sofort gelöscht.</li>
+  </ul>
+
+  <h2 class="mt-8 mb-4">3. Welche Daten werden verarbeitet?</h2>
+
+  <h3 class="mt-4 mb-2">3.1 Session-Token</h3>
+  <p>Für jeden Test wird ein zufällig generierter, anonymer Session-Token erstellt. Dieser Token
+  enthält keinerlei personenbezogene Informationen und dient ausschließlich der technischen
+  Zuordnung der Testergebnisse während der laufenden Session.</p>
+  <div class="card mt-2" style="background:var(--gray-50);">
+    <table style="width:100%; font-size:.85rem; border-collapse:collapse;">
+      <tr><th style="text-align:left; padding:.4rem .75rem; color:var(--gray-600);">Datum</th><th style="text-align:left; padding:.4rem .75rem; color:var(--gray-600);">Zweck</th><th style="text-align:left; padding:.4rem .75rem; color:var(--gray-600);">Speicherdauer</th></tr>
+      <tr><td style="padding:.4rem .75rem;">Session-Token (UUID)</td><td style="padding:.4rem .75rem;">Technische Zuordnung</td><td style="padding:.4rem .75rem;">24 Stunden, dann automatische Löschung</td></tr>
+      <tr><td style="padding:.4rem .75rem;">Analyseergebnisse (JSON)</td><td style="padding:.4rem .75rem;">Einstufungsbericht</td><td style="padding:.4rem .75rem;">24 Stunden nach Abschluss</td></tr>
+    </table>
+  </div>
+
+  <h3 class="mt-4 mb-2">3.2 Audio-Aufnahmen</h3>
+  <p>Für die Module M4 (Vorlesen) und M5 (Freies Sprechen) wird eine Sprachaufnahme im Browser
+  erstellt. Diese Aufnahme wird:</p>
+  <ul style="margin-top:.5rem; padding-left:1.5rem; display:flex; flex-direction:column; gap:.3rem;">
+    <li>Ausschließlich zur Transkription (OpenAI Whisper) und Analyse (GPT-4o) übertragen.</li>
+    <li><strong>Nicht dauerhaft gespeichert</strong> – die Datei wird nach der Analyse sofort gelöscht.</li>
+    <li>Nicht mit personenbezogenen Daten verknüpft.</li>
+    <li>Nicht für das Training von KI-Modellen verwendet (gemäß OpenAI API-Nutzungsbedingungen).</li>
+  </ul>
+
+  <h3 class="mt-4 mb-2">3.3 Handschrift-Fotos (Modul M6)</h3>
+  <p>Beim Modul M6 (Schreiben) besteht die Option, ein Foto eines handgeschriebenen Textes
+  hochzuladen. Dieses Foto wird:</p>
+  <ul style="margin-top:.5rem; padding-left:1.5rem; display:flex; flex-direction:column; gap:.3rem;">
+    <li>Ausschließlich zur Texterkennung (GPT-4o Vision) übertragen.</li>
+    <li><strong>Sofort nach der Texterkennung gelöscht</strong> – es wird nicht gespeichert.</li>
+    <li>Nicht mit personenbezogenen Daten verknüpft.</li>
+  </ul>
+
+  <h3 class="mt-4 mb-2">3.4 Zahlungsdaten</h3>
+  <p>Zahlungen werden ausschließlich über <strong>Stripe</strong> abgewickelt. Kreditkartendaten
+  und sonstige Zahlungsinformationen werden von Stripe verarbeitet und sind nicht zugänglich für
+  den Betreiber dieser Plattform. Stripe ist PCI-DSS-zertifiziert. Weitere Informationen:
+  <a href="https://stripe.com/de/privacy" target="_blank">Stripe Datenschutzerklärung</a>.</p>
+  <p class="mt-2">Stripe speichert eine anonyme Transaktions-ID, die keinen Rückschluss auf die
+  Testergebnisse erlaubt.</p>
+
+  <h2 class="mt-8 mb-4">4. Einsatz von KI-Diensten (OpenAI)</h2>
+  <p>Für die Sprachanalyse werden folgende OpenAI-Dienste verwendet:</p>
+  <div class="card mt-2" style="background:var(--gray-50);">
+    <table style="width:100%; font-size:.85rem; border-collapse:collapse;">
+      <tr><th style="text-align:left; padding:.4rem .75rem; color:var(--gray-600);">Dienst</th><th style="text-align:left; padding:.4rem .75rem; color:var(--gray-600);">Verwendung</th><th style="text-align:left; padding:.4rem .75rem; color:var(--gray-600);">Datenweitergabe</th></tr>
+      <tr><td style="padding:.4rem .75rem;">Whisper (gpt-4o-transcribe)</td><td style="padding:.4rem .75rem;">Sprachtranskription</td><td style="padding:.4rem .75rem;">Anonyme Audiodatei</td></tr>
+      <tr><td style="padding:.4rem .75rem;">GPT-4.1</td><td style="padding:.4rem .75rem;">Textanalyse</td><td style="padding:.4rem .75rem;">Anonymer Transkripttext</td></tr>
+      <tr><td style="padding:.4rem .75rem;">GPT-4o Audio</td><td style="padding:.4rem .75rem;">Ausspracheanalyse</td><td style="padding:.4rem .75rem;">Anonyme Audiodatei</td></tr>
+      <tr><td style="padding:.4rem .75rem;">GPT-4o Vision</td><td style="padding:.4rem .75rem;">Handschrifterkennung</td><td style="padding:.4rem .75rem;">Anonymes Foto</td></tr>
+      <tr><td style="padding:.4rem .75rem;">TTS (tts-1)</td><td style="padding:.4rem .75rem;">Hörverstehen-Audio</td><td style="padding:.4rem .75rem;">Anonymer Text</td></tr>
+    </table>
+  </div>
+  <p class="mt-3">OpenAI verarbeitet die Daten gemäß seiner
+  <a href="https://openai.com/policies/api-data-usage-policies" target="_blank">API-Datenschutzrichtlinien</a>.
+  Über die API übermittelte Daten werden nicht für das Training von OpenAI-Modellen verwendet.</p>
+
+  <h2 class="mt-8 mb-4">5. Cookies und Tracking</h2>
+  <p>Diese Plattform verwendet <strong>keine Tracking-Cookies</strong>, keine Analyse-Tools
+  (wie Google Analytics) und keine Social-Media-Plugins. Es werden ausschließlich technisch
+  notwendige Session-Cookies eingesetzt, die nach dem Schließen des Browsers automatisch gelöscht werden.</p>
+
+  <h2 class="mt-8 mb-4">6. Ihre Rechte</h2>
+  <p>Da keine personenbezogenen Daten gespeichert werden, ist eine Identifikation einzelner
+  Nutzer nicht möglich. Dennoch stehen Ihnen folgende Rechte zu:</p>
+  <ul style="margin-top:.5rem; padding-left:1.5rem; display:flex; flex-direction:column; gap:.3rem;">
+    <li><strong>Auskunftsrecht</strong> (Art. 15 DSGVO)</li>
+    <li><strong>Recht auf Löschung</strong> (Art. 17 DSGVO) – Analysedaten werden automatisch nach 24 Stunden gelöscht.</li>
+    <li><strong>Beschwerderecht</strong> bei der zuständigen Datenschutzbehörde</li>
+  </ul>
+  <p class="mt-2">Für Anfragen wenden Sie sich an: <a href="mailto:{{ betreiber_email }}">{{ betreiber_email }}</a></p>
+
+  <h2 class="mt-8 mb-4">7. Datensicherheit</h2>
+  <p>Die Übertragung aller Daten erfolgt ausschließlich über <strong>HTTPS/TLS</strong>.
+  Der Server befindet sich in einem EU-Rechenzentrum (DigitalOcean Frankfurt).
+  Alle temporären Dateien werden mit automatischen Löschroutinen nach spätestens 24 Stunden entfernt.</p>
+
+  <h2 class="mt-8 mb-4">8. Änderungen dieser Erklärung</h2>
+  <p>Diese Datenschutzerklärung kann bei Bedarf aktualisiert werden. Das Datum der letzten
+  Aktualisierung ist oben angegeben.</p>
+
+  <div class="card mt-8" style="background:var(--gray-50);">
+    <h3 class="mb-2" id="impressum">Impressum</h3>
+    <p class="text-sm"><strong>{{ betreiber_name }}</strong><br>
+    {{ betreiber_adresse }}<br>
+    E-Mail: <a href="mailto:{{ betreiber_email }}">{{ betreiber_email }}</a></p>
+  </div>
+</div>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div><strong style="color:white;">DaF Sprachdiagnostik</strong></div>
+    <div class="flex gap-4 text-sm">
+      <a href="/">Startseite</a>
+      <a href="/dsgvo">Datenschutz</a>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

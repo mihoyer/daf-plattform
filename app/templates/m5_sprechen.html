@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M5 Sprechen – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <div class="badge badge-primary">🎙️ M5 – Freies Sprechen</div>
+  </div>
+</nav>
+
+<div class="container-sm" style="padding-top:2rem; padding-bottom:4rem;">
+  <div id="lade-bereich" class="text-center" style="padding:4rem 0;">
+    <div class="spinner" style="margin:0 auto 1rem;"></div>
+    <p class="text-muted">Aufgabe wird vorbereitet…</p>
+  </div>
+
+  <div id="aufgabe-bereich" class="hidden">
+    <!-- Aufgabe -->
+    <div class="card mb-6" style="background:var(--primary-lighter);">
+      <h2 class="mb-2">Freies Sprechen</h2>
+      <div class="alert alert-info mt-3">
+        <span class="alert-icon">💬</span>
+        <div>
+          <strong id="aufgabe-titel">–</strong>
+          <p class="text-sm mt-1" id="aufgabe-text">–</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analyse-Modus -->
+    <div class="card mb-6">
+      <h4 class="mb-3">Analyse-Modus</h4>
+      <div class="modus-toggle">
+        <button class="modus-btn active" id="btn-schnell" onclick="setModus('schnell')">⚡ Schnellanalyse</button>
+        <button class="modus-btn" id="btn-tief" onclick="setModus('tief')">🔬 Tiefenanalyse</button>
+      </div>
+      <p class="text-xs text-muted mt-2" id="modus-info">Grammatik, Wortschatz, Satzbau und Pragmatik werden analysiert. Aussprache wird aus dem Transkript abgeleitet (~15 Sek.).</p>
+    </div>
+
+    <!-- Aufnahme -->
+    <div class="card mb-6">
+      <h4 class="mb-4">Sprachaufnahme</h4>
+      <div class="recorder-container" id="recorder-container">
+        <button class="recorder-btn idle" id="recorder-btn" onclick="toggleAufnahme()">🎙️</button>
+        <div id="recorder-status" class="text-muted text-sm mb-2">Klicke zum Starten der Aufnahme</div>
+        <div class="recording-timer hidden" id="timer">0:00</div>
+        <div class="waveform hidden" id="waveform">
+          <div class="waveform-bar" style="height:8px;"></div>
+          <div class="waveform-bar" style="height:16px;"></div>
+          <div class="waveform-bar" style="height:24px;"></div>
+          <div class="waveform-bar" style="height:16px;"></div>
+          <div class="waveform-bar" style="height:8px;"></div>
+        </div>
+        <div class="text-xs text-muted mt-2">Mindestens 30 Sekunden · Maximal 3 Minuten</div>
+      </div>
+
+      <!-- Audio-Preview -->
+      <div id="audio-preview" class="hidden mt-4">
+        <audio id="audio-player" controls style="width:100%;"></audio>
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-outline btn-sm" onclick="neueAufnahme()">🔄 Neu aufnehmen</button>
+          <button class="btn btn-primary" id="btn-analysieren" onclick="sendeAudio()">Analysieren →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hinweise -->
+    <div class="alert alert-info">
+      <span class="alert-icon">💡</span>
+      <div class="text-sm">
+        Sprich frei und natürlich. Es gibt keine richtige oder falsche Antwort.
+        Versuche, mindestens 30 Sekunden zu sprechen.
+        <strong>Deine Aufnahme wird nach der Analyse automatisch gelöscht.</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- Analyse-Overlay -->
+  <div id="analyse-overlay" class="analyse-overlay hidden">
+    <div class="analyse-card">
+      <div class="spinner"></div>
+      <h3 id="analyse-titel">Analyse läuft…</h3>
+      <p class="text-muted mt-2" id="analyse-info">Deine Sprachprobe wird transkribiert und analysiert.</p>
+      <div class="score-bar mt-4" style="width:200px; margin:1rem auto 0;">
+        <div class="score-bar-fill high" id="analyse-progress" style="width:10%; transition: width 2s ease;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const token = '{{ token }}';
+let mediaRecorder = null;
+let audioChunks = [];
+let audioBlob = null;
+let aufnahmeStart = null;
+let timerInterval = null;
+let modus = 'schnell';
+let aufgabeId = null;
+
+async function ladeAufgabe() {
+  try {
+    const res = await fetch(`/api/m5/aufgabe/${token}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    aufgabeId = data.aufgabe_id;
+    document.getElementById('aufgabe-titel').textContent = data.thema;
+    document.getElementById('aufgabe-text').textContent = data.anweisung;
+    document.getElementById('lade-bereich').classList.add('hidden');
+    document.getElementById('aufgabe-bereich').classList.remove('hidden');
+  } catch (e) {
+    document.getElementById('lade-bereich').innerHTML =
+      '<div class="alert alert-danger"><span>⚠️</span><div>Fehler beim Laden der Aufgabe.</div></div>';
+  }
+}
+
+function setModus(m) {
+  modus = m;
+  document.getElementById('btn-schnell').classList.toggle('active', m === 'schnell');
+  document.getElementById('btn-tief').classList.toggle('active', m === 'tief');
+  const info = m === 'schnell'
+    ? 'Grammatik, Wortschatz, Satzbau und Pragmatik werden analysiert. Aussprache wird aus dem Transkript abgeleitet (~15 Sek.).'
+    : 'GPT-4o hört das Audio direkt. Echte Aussprache-, Akzent- und Fluss-Bewertung. (~30 Sek.)';
+  document.getElementById('modus-info').textContent = info;
+}
+
+async function toggleAufnahme() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stoppeAufnahme();
+  } else {
+    await starteAufnahme();
+  }
+}
+
+async function starteAufnahme() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+    mediaRecorder.onstop = () => {
+      audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const url = URL.createObjectURL(audioBlob);
+      document.getElementById('audio-player').src = url;
+      document.getElementById('recorder-container').classList.remove('recording');
+      document.getElementById('recorder-btn').className = 'recorder-btn done';
+      document.getElementById('recorder-btn').textContent = '✓';
+      document.getElementById('recorder-status').textContent = 'Aufnahme abgeschlossen';
+      document.getElementById('timer').classList.add('hidden');
+      document.getElementById('waveform').classList.add('hidden');
+      document.getElementById('audio-preview').classList.remove('hidden');
+      stream.getTracks().forEach(t => t.stop());
+      clearInterval(timerInterval);
+    };
+    mediaRecorder.start();
+    aufnahmeStart = Date.now();
+    document.getElementById('recorder-container').classList.add('recording');
+    document.getElementById('recorder-btn').className = 'recorder-btn recording';
+    document.getElementById('recorder-btn').textContent = '⏹';
+    document.getElementById('recorder-status').textContent = 'Aufnahme läuft… (Klicke zum Stoppen)';
+    document.getElementById('timer').classList.remove('hidden');
+    document.getElementById('waveform').classList.remove('hidden');
+
+    timerInterval = setInterval(() => {
+      const sek = Math.floor((Date.now() - aufnahmeStart) / 1000);
+      const min = Math.floor(sek / 60);
+      const s = sek % 60;
+      document.getElementById('timer').textContent = `${min}:${s.toString().padStart(2, '0')}`;
+      if (sek >= 180) stoppeAufnahme();
+    }, 500);
+  } catch (e) {
+    alert('Mikrofon-Zugriff verweigert. Bitte erlaube den Zugriff auf das Mikrofon.');
+  }
+}
+
+function stoppeAufnahme() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+}
+
+function neueAufnahme() {
+  audioBlob = null;
+  document.getElementById('audio-preview').classList.add('hidden');
+  document.getElementById('recorder-btn').className = 'recorder-btn idle';
+  document.getElementById('recorder-btn').textContent = '🎙️';
+  document.getElementById('recorder-status').textContent = 'Klicke zum Starten der Aufnahme';
+  document.getElementById('recorder-container').classList.remove('recording');
+}
+
+async function sendeAudio() {
+  if (!audioBlob) return;
+  const dauer = (Date.now() - aufnahmeStart) / 1000;
+  if (dauer < 10) { alert('Bitte sprich mindestens 10 Sekunden.'); return; }
+
+  document.getElementById('analyse-overlay').classList.remove('hidden');
+  simuliereProgress();
+
+  const formData = new FormData();
+  formData.append('audio', audioBlob, 'aufnahme.webm');
+  formData.append('modus', modus);
+  formData.append('aufgabe_id', aufgabeId || '');
+
+  try {
+    const res = await fetch(`/api/m5/analysieren/${token}`, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Fehler');
+    const data = await res.json();
+    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+  } catch (e) {
+    document.getElementById('analyse-overlay').classList.add('hidden');
+    alert(`Analysefehler: ${e.message}`);
+  }
+}
+
+function simuliereProgress() {
+  const bar = document.getElementById('analyse-progress');
+  let p = 10;
+  const iv = setInterval(() => {
+    p = Math.min(p + Math.random() * 8, 90);
+    bar.style.width = p + '%';
+    if (p >= 90) clearInterval(iv);
+  }, 800);
+}
+
+ladeAufgabe();
+</script>
+</body>
+</html>

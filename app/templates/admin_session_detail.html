@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Session Detail – Admin</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/admin/dashboard" class="navbar-brand"><div class="brand-icon">🎓</div>← Dashboard</a>
+    <div class="flex gap-2">
+      <a href="/export/pdf/{{ session.token }}" class="btn btn-primary btn-sm" target="_blank">📄 PDF</a>
+      <a href="/export/json/{{ session.token }}" class="btn btn-outline btn-sm" target="_blank">{ } JSON</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container" style="padding-top:2rem; padding-bottom:4rem; max-width:900px;">
+  <div class="flex justify-between items-start flex-wrap gap-4 mb-6">
+    <div>
+      <h1>Session Detail</h1>
+      <p class="text-muted text-sm mt-1" style="font-family:monospace;">{{ session.token }}</p>
+    </div>
+    <div class="flex gap-2 flex-wrap">
+      <span class="badge badge-gray">{{ session.paket }}</span>
+      <span class="badge badge-success">{{ session.status }}</span>
+      {% if session.cefr_niveau %}<span class="badge badge-primary">{{ session.cefr_niveau }}</span>{% endif %}
+    </div>
+  </div>
+
+  <!-- Scores -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
+    <div class="card text-center">
+      <div class="text-sm text-muted mb-1">Gesamtscore</div>
+      <div style="font-size:2.5rem; font-weight:800; color:var(--primary);">{{ session.gesamtscore | round(1) }}</div>
+    </div>
+    <div class="card text-center">
+      <div class="text-sm text-muted mb-1">CEFR</div>
+      <div style="font-size:2.5rem; font-weight:800;">{{ session.cefr_niveau or '–' }}</div>
+    </div>
+  </div>
+
+  <!-- Gesamteinschätzung -->
+  {% if session.gesamteinschaetzung %}
+  <div class="card mb-4">
+    <h3 class="mb-2">Gesamteinschätzung</h3>
+    <p class="text-muted">{{ session.gesamteinschaetzung }}</p>
+  </div>
+  {% endif %}
+
+  <!-- Module -->
+  {% for modul in session.module_ergebnisse %}
+  <div class="card mb-4">
+    <div class="flex justify-between items-center mb-3">
+      <h3>{{ modul.modul_name }}</h3>
+      <span style="font-weight:700; font-size:1.2rem;">{{ modul.score | round(1) }}/100</span>
+    </div>
+    {% if modul.zusammenfassung %}
+    <p class="text-sm text-muted mb-3">{{ modul.zusammenfassung }}</p>
+    {% endif %}
+    {% if modul.skills %}
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:.5rem;">
+      {% for skill in modul.skills %}
+      <div style="background:var(--gray-50); border-radius:6px; padding:.6rem;">
+        <div class="flex justify-between">
+          <span class="text-xs font-bold">{{ skill.name }}</span>
+          <span class="text-xs font-bold">{{ skill.score }}/10</span>
+        </div>
+        {% if skill.begruendung %}
+        <p class="text-xs text-muted mt-1">{{ skill.begruendung }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <!-- Stärken & Schwächen -->
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
+    <div class="card">
+      <h3 class="mb-3" style="color:var(--success);">✅ Stärken</h3>
+      <ul style="list-style:none; display:flex; flex-direction:column; gap:.4rem;">
+        {% for s in session.staerken %}<li class="text-sm">✓ {{ s }}</li>{% endfor %}
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="mb-3" style="color:var(--warning);">⚠️ Verbesserungsbedarf</h3>
+      <ul style="list-style:none; display:flex; flex-direction:column; gap:.4rem;">
+        {% for s in session.schwaechen %}<li class="text-sm">→ {{ s }}</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <!-- Meta -->
+  <div class="card" style="background:var(--gray-50);">
+    <h4 class="mb-3">Session-Informationen</h4>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:.5rem; font-size:.85rem;">
+      <div><span class="text-muted">Erstellt:</span> {{ session.erstellt_am }}</div>
+      <div><span class="text-muted">Abgeschlossen:</span> {{ session.abgeschlossen_am or '–' }}</div>
+      <div><span class="text-muted">Paket:</span> {{ session.paket }}</div>
+      <div><span class="text-muted">Hilfssprache:</span> {{ session.hilfssprache or 'de' }}</div>
+      <div><span class="text-muted">Währung:</span> {{ session.waehrung or '–' }}</div>
+      <div><span class="text-muted">Zahlungsstatus:</span> {{ session.zahlung_status or '–' }}</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

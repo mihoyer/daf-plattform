@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test starten – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <div class="badge badge-success">✓ Zahlung bestätigt</div>
+  </div>
+</nav>
+
+<div class="container-sm" style="padding-top:3rem; padding-bottom:4rem;">
+  <div id="lade-bereich" class="text-center" style="padding:4rem 0;">
+    <div class="spinner" style="margin:0 auto 1rem;"></div>
+    <p class="text-muted">Session wird geladen…</p>
+  </div>
+
+  <div id="inhalt" class="hidden">
+    <div class="text-center mb-8">
+      <div class="badge badge-primary mb-3" id="paket-badge">–</div>
+      <h1>Bereit für deinen Sprachtest?</h1>
+      <p class="text-muted mt-2">Dein Test besteht aus den folgenden Modulen. Bearbeite sie der Reihe nach.</p>
+    </div>
+
+    <!-- Fortschrittsanzeige -->
+    <div class="progress-steps mb-8" id="progress-steps"></div>
+
+    <!-- Modul-Liste -->
+    <div id="modul-liste" style="display:flex; flex-direction:column; gap:1rem; margin-bottom:2rem;"></div>
+
+    <!-- Hinweise -->
+    <div class="card" style="background:var(--accent-light); border-color:var(--accent);">
+      <h4 class="mb-2">💡 Hinweise vor dem Start</h4>
+      <ul style="list-style:none; display:flex; flex-direction:column; gap:.5rem;">
+        <li class="text-sm">🎙️ Stelle sicher, dass dein Mikrofon funktioniert und der Browser Zugriff hat.</li>
+        <li class="text-sm">🔇 Suche einen ruhigen Ort ohne Hintergrundgeräusche.</li>
+        <li class="text-sm">⏱️ Plane ca. 20–40 Minuten für den vollständigen Test ein.</li>
+        <li class="text-sm">🔒 Deine Aufnahmen werden nach der Analyse automatisch gelöscht.</li>
+      </ul>
+    </div>
+
+    <div class="text-center mt-8">
+      <button class="btn btn-primary btn-lg" onclick="starteTest()">Test jetzt starten →</button>
+      <p class="text-xs text-muted mt-3">Session-ID: <span id="session-token-kurz">–</span></p>
+    </div>
+  </div>
+</div>
+
+<script>
+const token = '{{ token }}';
+let sessionData = null;
+
+const MODUL_INFO = {
+  m1_grammatik:     { icon: '📝', name: 'Grammatik & Wortschatz', dauer: '~8 Min.' },
+  m2_lesen:         { icon: '📖', name: 'Lesen & Leseverstehen', dauer: '~8 Min.' },
+  m3_hoerverstehen: { icon: '🎧', name: 'Hörverstehen', dauer: '~6 Min.' },
+  m4_vorlesen:      { icon: '🔊', name: 'Vorlesen', dauer: '~4 Min.' },
+  m5_sprechen:      { icon: '🎙️', name: 'Freies Sprechen', dauer: '~5 Min.' },
+  m6_schreiben:     { icon: '✍️', name: 'Schreiben', dauer: '~10 Min.' },
+};
+
+async function ladeSession() {
+  try {
+    const res = await fetch(`/api/session/${token}`);
+    if (!res.ok) throw new Error('Session nicht gefunden');
+    sessionData = await res.json();
+    zeigeSession();
+  } catch (e) {
+    document.getElementById('lade-bereich').innerHTML =
+      '<div class="alert alert-danger"><span class="alert-icon">⚠️</span><div>Session nicht gefunden oder abgelaufen.</div></div>';
+  }
+}
+
+function zeigeSession() {
+  document.getElementById('lade-bereich').classList.add('hidden');
+  document.getElementById('inhalt').classList.remove('hidden');
+  document.getElementById('paket-badge').textContent = `Paket ${sessionData.paket.charAt(0).toUpperCase() + sessionData.paket.slice(1)}`;
+  document.getElementById('session-token-kurz').textContent = token.substring(0, 8) + '…';
+
+  // Fortschrittsanzeige
+  const stepsEl = document.getElementById('progress-steps');
+  sessionData.module.forEach((m, i) => {
+    const info = MODUL_INFO[m.modul] || { icon: '📋', name: m.modul };
+    const div = document.createElement('div');
+    div.className = 'step';
+    div.innerHTML = `
+      <div class="step-circle">${i + 1}</div>
+      <div class="step-label">${info.icon} ${info.name.split(' ')[0]}</div>
+    `;
+    stepsEl.appendChild(div);
+  });
+
+  // Modul-Liste
+  const listeEl = document.getElementById('modul-liste');
+  sessionData.module.forEach((m, i) => {
+    const info = MODUL_INFO[m.modul] || { icon: '📋', name: m.modul, dauer: '' };
+    const div = document.createElement('div');
+    div.className = 'card flex items-center justify-between';
+    div.style.padding = '1rem 1.25rem';
+    div.innerHTML = `
+      <div class="flex items-center gap-3">
+        <div style="width:44px;height:44px;background:var(--gray-100);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">${info.icon}</div>
+        <div>
+          <div class="font-bold text-sm">Modul ${i + 1}: ${info.name}</div>
+          <div class="text-xs text-muted">${info.dauer}</div>
+        </div>
+      </div>
+      <div class="badge badge-gray">Ausstehend</div>
+    `;
+    listeEl.appendChild(div);
+  });
+}
+
+function starteTest() {
+  if (!sessionData || !sessionData.module.length) return;
+  const erstesModul = sessionData.module[0].modul;
+  window.location.href = `/${erstesModul.replace('_', '/')}/${token}`;
+}
+
+ladeSession();
+</script>
+</body>
+</html>

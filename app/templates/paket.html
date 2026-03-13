@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paket wählen – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+  </div>
+</nav>
+
+<div class="container-sm" style="padding-top:3rem; padding-bottom:4rem;">
+  <div class="text-center mb-8">
+    <h1>Paket &amp; Sprache wählen</h1>
+    <p class="text-muted mt-2">Wähle dein Analysepaket und deine bevorzugte Hilfssprache für die Aufgabenanweisungen.</p>
+  </div>
+
+  <!-- Hilfssprache -->
+  <div class="card mb-6">
+    <h3 class="mb-4">Aufgabenanweisungen in</h3>
+    <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:.75rem;" id="sprachen-grid">
+      <button class="sprache-btn active" data-lang="de">🇩🇪 Deutsch</button>
+      <button class="sprache-btn" data-lang="en">🇬🇧 English</button>
+      <button class="sprache-btn" data-lang="fr">🇫🇷 Français</button>
+      <button class="sprache-btn" data-lang="es">🇪🇸 Español</button>
+      <button class="sprache-btn" data-lang="it">🇮🇹 Italiano</button>
+      <button class="sprache-btn" data-lang="tr">🇹🇷 Türkçe</button>
+      <button class="sprache-btn" data-lang="ar">🇸🇦 العربية</button>
+      <button class="sprache-btn" data-lang="uk">🇺🇦 Українська</button>
+      <button class="sprache-btn" data-lang="ru">🇷🇺 Русский</button>
+      <button class="sprache-btn" data-lang="fa">🇮🇷 فارسی</button>
+      <button class="sprache-btn" data-lang="zh">🇨🇳 中文</button>
+      <button class="sprache-btn" data-lang="pl">🇵🇱 Polski</button>
+    </div>
+  </div>
+
+  <!-- Paket-Auswahl -->
+  <h3 class="mb-4">Analysepaket wählen</h3>
+  <div class="paket-grid" id="paket-grid">
+    <div class="paket-card" data-paket="basis" onclick="waehlePaket('basis')">
+      <div class="text-muted text-sm font-bold mb-2">BASIS</div>
+      <div class="paket-preis">6 CHF</div>
+      <ul class="paket-features mt-3">
+        <li>M1 Grammatik &amp; Wortschatz</li>
+        <li>M5 Freies Sprechen</li>
+        <li>CEFR-Einstufung + PDF</li>
+      </ul>
+    </div>
+    <div class="paket-card featured" data-paket="standard" onclick="waehlePaket('standard')">
+      <div class="paket-badge">Empfohlen</div>
+      <div class="text-muted text-sm font-bold mb-2">STANDARD</div>
+      <div class="paket-preis">10 CHF</div>
+      <ul class="paket-features mt-3">
+        <li>M1 Grammatik &amp; Wortschatz</li>
+        <li>M2 Lesen &amp; Leseverstehen</li>
+        <li>M4 Vorlesen</li>
+        <li>M5 Freies Sprechen</li>
+        <li>PDF + JSON Export</li>
+      </ul>
+    </div>
+    <div class="paket-card" data-paket="premium" onclick="waehlePaket('premium')">
+      <div class="text-muted text-sm font-bold mb-2">PREMIUM</div>
+      <div class="paket-preis">14 CHF</div>
+      <ul class="paket-features mt-3">
+        <li>Alle 6 Module</li>
+        <li>M3 Hörverstehen</li>
+        <li>M6 Schreiben + Handschrift</li>
+        <li>Tiefenanalyse Aussprache</li>
+        <li>PDF + JSON Export</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Währung -->
+  <div class="card mt-6">
+    <h3 class="mb-3">Zahlungswährung</h3>
+    <div class="flex gap-3">
+      <label class="mc-option" style="cursor:pointer; flex:1;">
+        <input type="radio" name="waehrung" value="CHF" checked> 🇨🇭 CHF (Schweizer Franken)
+      </label>
+      <label class="mc-option" style="cursor:pointer; flex:1;">
+        <input type="radio" name="waehrung" value="EUR"> 🇪🇺 EUR (Euro)
+      </label>
+    </div>
+  </div>
+
+  <div id="weiter-bereich" class="hidden mt-8 text-center">
+    <div class="card mb-4" style="background:var(--primary-lighter);">
+      <div class="flex justify-between items-center">
+        <div>
+          <div class="font-bold" id="zusammenfassung-paket">–</div>
+          <div class="text-sm text-muted" id="zusammenfassung-module">–</div>
+        </div>
+        <div class="paket-preis" id="zusammenfassung-preis" style="font-size:1.5rem;">–</div>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-lg w-full" onclick="weiter()">Weiter zur Zahlung →</button>
+    <p class="text-xs text-muted mt-3">🔒 Sichere Zahlung via Stripe · Keine Datenspeicherung</p>
+  </div>
+</div>
+
+<style>
+.sprache-btn {
+  padding: .6rem .75rem; border: 1.5px solid var(--gray-200); border-radius: var(--radius);
+  background: var(--white); cursor: pointer; font-size: .85rem; font-weight: 500;
+  transition: var(--transition); text-align: left;
+}
+.sprache-btn:hover { border-color: var(--primary-light); background: var(--primary-lighter); }
+.sprache-btn.active { border-color: var(--primary-light); background: var(--primary-lighter); color: var(--primary); font-weight: 600; }
+</style>
+
+<script>
+const PAKETE = {
+  basis:    { name: 'Basis', preis_chf: 6, preis_eur: 5.80, module: 'M1 + M5' },
+  standard: { name: 'Standard', preis_chf: 10, preis_eur: 9.50, module: 'M1 + M2 + M4 + M5' },
+  premium:  { name: 'Premium', preis_chf: 14, preis_eur: 13.50, module: 'M1 + M2 + M3 + M4 + M5 + M6' },
+};
+
+let gewaehltesPaket = null;
+let gewaehlteSprache = 'de';
+let gewaelteWaehrung = 'CHF';
+
+// URL-Parameter
+const urlParams = new URLSearchParams(window.location.search);
+const vorauswahl = urlParams.get('p');
+if (vorauswahl && PAKETE[vorauswahl]) setTimeout(() => waehlePaket(vorauswahl), 100);
+
+function waehlePaket(paket) {
+  gewaehltesPaket = paket;
+  document.querySelectorAll('.paket-card').forEach(c => c.classList.remove('selected'));
+  document.querySelector(`[data-paket="${paket}"]`).classList.add('selected');
+  aktualisiereZusammenfassung();
+  document.getElementById('weiter-bereich').classList.remove('hidden');
+}
+
+document.querySelectorAll('.sprache-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sprache-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    gewaehlteSprache = btn.dataset.lang;
+    aktualisiereZusammenfassung();
+  });
+});
+
+document.querySelectorAll('input[name="waehrung"]').forEach(r => {
+  r.addEventListener('change', () => {
+    gewaelteWaehrung = r.value;
+    aktualisiereZusammenfassung();
+  });
+});
+
+function aktualisiereZusammenfassung() {
+  if (!gewaehltesPaket) return;
+  const p = PAKETE[gewaehltesPaket];
+  const preis = gewaelteWaehrung === 'CHF' ? p.preis_chf + ' CHF' : p.preis_eur + ' EUR';
+  document.getElementById('zusammenfassung-paket').textContent = `Paket ${p.name}`;
+  document.getElementById('zusammenfassung-module').textContent = p.module;
+  document.getElementById('zusammenfassung-preis').textContent = preis;
+}
+
+async function weiter() {
+  if (!gewaehltesPaket) return;
+  const waehrung = document.querySelector('input[name="waehrung"]:checked').value;
+  const btn = document.querySelector('#weiter-bereich .btn');
+  btn.disabled = true;
+  btn.textContent = 'Wird vorbereitet…';
+
+  try {
+    const res = await fetch('/api/session/erstellen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paket: gewaehltesPaket, hilfssprache: gewaehlteSprache, waehrung }),
+    });
+    const data = await res.json();
+    if (data.checkout_url) {
+      window.location.href = data.checkout_url;
+    } else if (data.token) {
+      // Testmodus ohne Zahlung
+      window.location.href = `/test/${data.token}`;
+    }
+  } catch (e) {
+    alert('Fehler beim Erstellen der Session. Bitte versuche es erneut.');
+    btn.disabled = false;
+    btn.textContent = 'Weiter zur Zahlung →';
+  }
+}
+</script>
+</body>
+</html>

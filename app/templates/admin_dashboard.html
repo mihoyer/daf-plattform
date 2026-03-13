@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <div class="flex gap-3 items-center">
+      <span class="badge badge-primary">Admin</span>
+      <a href="/admin/logout" class="btn btn-outline btn-sm">Abmelden</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container" style="padding-top:2rem; padding-bottom:4rem; max-width:1100px;">
+  <div class="flex justify-between items-center mb-8 flex-wrap gap-4">
+    <h1>Admin Dashboard</h1>
+    <div class="flex gap-2">
+      <a href="/admin/export/csv" class="btn btn-outline btn-sm">📊 CSV exportieren</a>
+      <a href="/admin/session/neu" class="btn btn-primary btn-sm">+ Neue Session</a>
+    </div>
+  </div>
+
+  <!-- Statistiken -->
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; margin-bottom:2rem;">
+    <div class="card text-center">
+      <div style="font-size:2rem; font-weight:800; color:var(--primary);">{{ stats.gesamt }}</div>
+      <div class="text-sm text-muted">Analysen gesamt</div>
+    </div>
+    <div class="card text-center">
+      <div style="font-size:2rem; font-weight:800; color:var(--success);">{{ stats.abgeschlossen }}</div>
+      <div class="text-sm text-muted">Abgeschlossen</div>
+    </div>
+    <div class="card text-center">
+      <div style="font-size:2rem; font-weight:800; color:var(--warning);">{{ stats.laufend }}</div>
+      <div class="text-sm text-muted">Laufend</div>
+    </div>
+    <div class="card text-center">
+      <div style="font-size:2rem; font-weight:800; color:var(--gray-700);">{{ stats.avg_score }}</div>
+      <div class="text-sm text-muted">Ø Gesamtscore</div>
+    </div>
+    <div class="card text-center">
+      <div style="font-size:2rem; font-weight:800; color:var(--primary);">{{ stats.heute }}</div>
+      <div class="text-sm text-muted">Heute</div>
+    </div>
+  </div>
+
+  <!-- CEFR-Verteilung -->
+  {% if stats.cefr_verteilung %}
+  <div class="card mb-6">
+    <h3 class="mb-4">CEFR-Verteilung</h3>
+    <div class="flex gap-3 flex-wrap">
+      {% for niveau, anzahl in stats.cefr_verteilung.items() %}
+      <div style="text-align:center; min-width:60px;">
+        <div style="font-size:1.5rem; font-weight:800;">{{ anzahl }}</div>
+        <div class="badge badge-gray">{{ niveau }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Filter -->
+  <div class="card mb-4">
+    <form method="GET" action="/admin/dashboard" class="flex gap-3 flex-wrap items-end">
+      <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
+        <label class="form-label">Paket</label>
+        <select name="paket" class="form-input">
+          <option value="">Alle</option>
+          <option value="basis" {% if filter_paket == 'basis' %}selected{% endif %}>Basis</option>
+          <option value="standard" {% if filter_paket == 'standard' %}selected{% endif %}>Standard</option>
+          <option value="premium" {% if filter_paket == 'premium' %}selected{% endif %}>Premium</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
+        <label class="form-label">Status</label>
+        <select name="status" class="form-input">
+          <option value="">Alle</option>
+          <option value="abgeschlossen" {% if filter_status == 'abgeschlossen' %}selected{% endif %}>Abgeschlossen</option>
+          <option value="laufend" {% if filter_status == 'laufend' %}selected{% endif %}>Laufend</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
+        <label class="form-label">CEFR</label>
+        <select name="cefr" class="form-input">
+          <option value="">Alle</option>
+          {% for n in ['A1','A2','B1','B2','C1','C2'] %}
+          <option value="{{ n }}" {% if filter_cefr == n %}selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
+      <a href="/admin/dashboard" class="btn btn-outline btn-sm">Zurücksetzen</a>
+    </form>
+  </div>
+
+  <!-- Sessions-Tabelle -->
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:.875rem;">
+        <thead>
+          <tr style="background:var(--gray-50); border-bottom:1px solid var(--gray-200);">
+            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Session</th>
+            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Paket</th>
+            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Status</th>
+            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">CEFR</th>
+            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Score</th>
+            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Datum</th>
+            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Aktionen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sessions %}
+          <tr style="border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''">
+            <td style="padding:.75rem 1rem; font-family:monospace; font-size:.8rem; color:var(--gray-500);">{{ s.token[:12] }}…</td>
+            <td style="padding:.75rem 1rem;">
+              <span class="badge badge-gray">{{ s.paket }}</span>
+            </td>
+            <td style="padding:.75rem 1rem;">
+              {% if s.status == 'abgeschlossen' %}
+              <span class="badge badge-success">✓ Abgeschlossen</span>
+              {% elif s.status == 'laufend' %}
+              <span class="badge badge-warning">⏳ Laufend</span>
+              {% else %}
+              <span class="badge badge-gray">{{ s.status }}</span>
+              {% endif %}
+            </td>
+            <td style="padding:.75rem 1rem;">
+              {% if s.cefr_niveau %}
+              <span style="font-weight:700; color:var(--primary);">{{ s.cefr_niveau }}</span>
+              {% else %}–{% endif %}
+            </td>
+            <td style="padding:.75rem 1rem;">
+              {% if s.gesamtscore %}
+              <span style="font-weight:600;">{{ s.gesamtscore | round(1) }}</span>
+              {% else %}–{% endif %}
+            </td>
+            <td style="padding:.75rem 1rem; color:var(--gray-500);">{{ s.erstellt_am }}</td>
+            <td style="padding:.75rem 1rem;">
+              <div class="flex gap-1">
+                {% if s.status == 'abgeschlossen' %}
+                <a href="/admin/session/{{ s.token }}" class="btn btn-outline btn-sm" style="padding:.25rem .6rem; font-size:.75rem;">Details</a>
+                <a href="/export/pdf/{{ s.token }}" class="btn btn-outline btn-sm" style="padding:.25rem .6rem; font-size:.75rem;" target="_blank">PDF</a>
+                {% endif %}
+                <a href="/admin/session/{{ s.token }}/loeschen" class="btn btn-sm" style="padding:.25rem .6rem; font-size:.75rem; background:var(--danger-light); color:var(--danger); border:1px solid var(--danger-light);"
+                   onclick="return confirm('Session wirklich löschen?')">🗑️</a>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="7" style="padding:3rem; text-align:center; color:var(--gray-400);">
+              Keine Sessions gefunden.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Pagination -->
+  {% if total_seiten > 1 %}
+  <div class="flex gap-2 justify-center mt-4">
+    {% for i in range(1, total_seiten + 1) %}
+    <a href="?seite={{ i }}&paket={{ filter_paket }}&status={{ filter_status }}&cefr={{ filter_cefr }}"
+       class="btn btn-sm {% if i == aktuelle_seite %}btn-primary{% else %}btn-outline{% endif %}"
+       style="padding:.3rem .7rem;">{{ i }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+</body>
+</html>

@@ -1,0 +1,654 @@
+"""
+Haupt-Router: Alle API-Endpunkte der DaF-Plattform.
+"""
+import json
+import os
+import secrets
+import tempfile
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.models.database import (
+    CEFRNiveau, GutscheinCode, Hilfssprache, ModulErgebnis, ModulStatus,
+    ModulTyp, PAKET_MODULE, PaketTyp, SessionStatus, ZahlungsStatus, get_db,
+)
+from app.services import m1_service, m2_service, m3_service, openai_service, session_service, stripe_service
+
+router = APIRouter()
+
+UPLOAD_DIR = "/tmp/daf_uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+# ── Hilfsfunktionen ──────────────────────────────────────────────────────────
+
+def _get_modul(sess, modul_typ: ModulTyp) -> Optional[ModulErgebnis]:
+    for m in sess.module:
+        if m.modul == modul_typ:
+            return m
+    return None
+
+
+def _score_to_cefr(score: float) -> str:
+    if score >= 90: return "C2"
+    if score >= 78: return "C1"
+    if score >= 65: return "B2"
+    if score >= 50: return "B1"
+    if score >= 35: return "A2"
+    return "A1"
+
+
+# ── Session ──────────────────────────────────────────────────────────────────
+
+@router.post("/api/session/erstelle")
+async def erstelle_session(
+    paket: str = Form("demo"),
+    hilfssprache: str = Form("de"),
+    waehrung: str = Form("CHF"),
+    gutschein: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    paket_enum = PaketTyp(paket) if paket in PaketTyp._value2member_map_ else PaketTyp.demo
+    hilfs_enum = Hilfssprache(hilfssprache) if hilfssprache in Hilfssprache._value2member_map_ else Hilfssprache.de
+
+    zahlungs_status = ZahlungsStatus.demo
+    stripe_pi_id = None
+
+    # Gutschein prüfen
+    if gutschein:
+        gc = await session_service.validiere_gutschein(db, gutschein)
+        if gc:
+            paket_enum = gc.paket
+            zahlungs_status = ZahlungsStatus.bezahlt
+            gc.genutzt += 1
+            await db.commit()
+        else:
+            raise HTTPException(status_code=400, detail="Ungültiger oder abgelaufener Gutscheincode.")
+
+    sess = await session_service.erstelle_session(db, paket_enum, hilfs_enum, waehrung)
+
+    if zahlungs_status == ZahlungsStatus.bezahlt:
+        sess.zahlungs_status = ZahlungsStatus.bezahlt
+        sess.status = SessionStatus.laufend
+        await db.commit()
+
+    return {"token": sess.token, "paket": paket_enum.value, "zahlungs_status": zahlungs_status.value}
+
+
+@router.get("/api/session/{token}/status")
+async def session_status(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+    return {
+        "token": sess.token,
+        "paket": sess.paket.value,
+        "status": sess.status.value,
+        "zahlungs_status": sess.zahlungs_status.value,
+        "grob_niveau": sess.grob_niveau.value if sess.grob_niveau else None,
+        "module": [{"modul": m.modul.value, "status": m.status.value, "reihenfolge": m.reihenfolge} for m in sorted(sess.module, key=lambda x: x.reihenfolge)],
+    }
+
+
+# ── Stripe ───────────────────────────────────────────────────────────────────
+
+@router.post("/api/zahlung/erstelle-intent")
+async def erstelle_payment_intent(
+    paket: str = Form("premium"),
+    waehrung: str = Form("CHF"),
+    token: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    paket_enum = PaketTyp(paket) if paket in PaketTyp._value2member_map_ else PaketTyp.premium
+    result = await stripe_service.erstelle_payment_intent(paket_enum, waehrung, token)
+
+    if result["payment_intent_id"] and token:
+        sess = await session_service.lade_session(db, token)
+        if sess:
+            sess.stripe_payment_intent_id = result["payment_intent_id"]
+            await db.commit()
+
+    return result
+
+
+@router.post("/api/zahlung/webhook")
+async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    event = await stripe_service.verarbeite_webhook(payload, sig)
+    if not event:
+        raise HTTPException(status_code=400, detail="Ungültige Webhook-Signatur.")
+
+    if event["type"] == "payment_intent.succeeded":
+        pi_id = event["data"]["object"]["id"]
+        sess = await session_service.aktiviere_session_nach_zahlung(db, pi_id)
+
+    return {"status": "ok"}
+
+
+@router.get("/api/zahlung/publishable-key")
+async def get_publishable_key():
+    return {"key": stripe_service.get_publishable_key()}
+
+
+# ── M1: Grammatik & Wortschatz ───────────────────────────────────────────────
+
+@router.get("/api/m1/{token}/items")
+async def m1_items(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess or sess.zahlungs_status not in (ZahlungsStatus.bezahlt, ZahlungsStatus.demo):
+        raise HTTPException(status_code=403, detail="Session nicht bezahlt oder nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m1_grammatik)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M1 nicht in diesem Paket.")
+
+    # Items aus Cache oder neu generieren
+    if modul.roh_antworten_json:
+        cached = modul.get_roh_antworten()
+        if "items" in cached:
+            return {"items": cached["items"], "niveau": modul.schwierigkeitsgrad or "B1"}
+
+    niveau = "B1"
+    items = await m1_service.generiere_items(niveau, sess.hilfssprache.value)
+    modul.set_roh_antworten({"items": items})
+    modul.schwierigkeitsgrad = niveau
+    modul.status = ModulStatus.laufend
+    await db.commit()
+
+    return {"items": items, "niveau": niveau}
+
+
+@router.post("/api/m1/{token}/submit")
+async def m1_submit(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m1_grammatik)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M1 nicht gefunden.")
+
+    body = await request.json()
+    antworten = body.get("antworten", {})
+
+    cached = modul.get_roh_antworten()
+    items = cached.get("items", [])
+
+    auswertung = await m1_service.werte_aus(items, antworten)
+
+    modul.set_ki_analyse(auswertung)
+    modul.gesamt_score = auswertung["score"]
+    modul.cefr_niveau = CEFRNiveau(auswertung["cefr"])
+    modul.status = ModulStatus.abgeschlossen
+    modul.abgeschlossen_am = datetime.now(timezone.utc)
+
+    # Grob-Niveau in Session speichern
+    sess.grob_niveau = CEFRNiveau(auswertung["cefr"])
+    sess.status = SessionStatus.laufend
+
+    await db.commit()
+
+    if sess.alle_abgeschlossen():
+        await session_service.berechne_gesamt_ergebnis(db, sess)
+
+    return auswertung
+
+
+# ── M2: Lesen & Leseverstehen ────────────────────────────────────────────────
+
+@router.get("/api/m2/{token}/aufgabe")
+async def m2_aufgabe(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m2_lesen)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M2 nicht in diesem Paket.")
+
+    if modul.roh_antworten_json:
+        cached = modul.get_roh_antworten()
+        if "aufgabe" in cached:
+            return cached["aufgabe"]
+
+    niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
+    aufgabe = await m2_service.generiere_leseaufgabe(niveau, sess.hilfssprache.value)
+    modul.set_roh_antworten({"aufgabe": aufgabe})
+    modul.schwierigkeitsgrad = niveau
+    modul.status = ModulStatus.laufend
+    await db.commit()
+
+    return aufgabe
+
+
+@router.post("/api/m2/{token}/submit")
+async def m2_submit(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m2_lesen)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M2 nicht gefunden.")
+
+    body = await request.json()
+    antworten = body.get("antworten", {})
+
+    cached = modul.get_roh_antworten()
+    aufgabe = cached.get("aufgabe", {})
+    fragen = aufgabe.get("fragen", [])
+
+    auswertung = await openai_service.analysiere_lesen(
+        aufgabe.get("text", ""), fragen, antworten, modul.schwierigkeitsgrad or "B1"
+    )
+
+    modul.set_ki_analyse(auswertung)
+    modul.gesamt_score = auswertung["score"]
+    modul.cefr_niveau = CEFRNiveau(auswertung["cefr"])
+    modul.status = ModulStatus.abgeschlossen
+    modul.abgeschlossen_am = datetime.now(timezone.utc)
+    await db.commit()
+
+    if sess.alle_abgeschlossen():
+        await session_service.berechne_gesamt_ergebnis(db, sess)
+
+    return auswertung
+
+
+# ── M3: Hörverstehen ─────────────────────────────────────────────────────────
+
+@router.get("/api/m3/{token}/aufgabe")
+async def m3_aufgabe(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m3_hoerverstehen)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M3 nicht in diesem Paket.")
+
+    if modul.roh_antworten_json:
+        cached = modul.get_roh_antworten()
+        if "aufgabe" in cached:
+            return cached["aufgabe"]
+
+    niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
+    aufgabe = await m3_service.generiere_hoeraufgabe(niveau, sess.hilfssprache.value)
+    modul.set_roh_antworten({"aufgabe": aufgabe})
+    modul.schwierigkeitsgrad = niveau
+    modul.status = ModulStatus.laufend
+    await db.commit()
+
+    return aufgabe
+
+
+@router.post("/api/m3/{token}/submit")
+async def m3_submit(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m3_hoerverstehen)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M3 nicht gefunden.")
+
+    body = await request.json()
+    antworten = body.get("antworten", {})
+
+    cached = modul.get_roh_antworten()
+    aufgabe = cached.get("aufgabe", {})
+    fragen = aufgabe.get("fragen", [])
+
+    auswertung = await openai_service.analysiere_hoerverstehen(fragen, antworten, modul.schwierigkeitsgrad or "B1")
+
+    modul.set_ki_analyse(auswertung)
+    modul.gesamt_score = auswertung["score"]
+    modul.cefr_niveau = CEFRNiveau(auswertung["cefr"])
+    modul.status = ModulStatus.abgeschlossen
+    modul.abgeschlossen_am = datetime.now(timezone.utc)
+    await db.commit()
+
+    if sess.alle_abgeschlossen():
+        await session_service.berechne_gesamt_ergebnis(db, sess)
+
+    return auswertung
+
+
+# ── M4: Vorlesen ─────────────────────────────────────────────────────────────
+
+@router.get("/api/m4/{token}/text")
+async def m4_text(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m4_vorlesen)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M4 nicht in diesem Paket.")
+
+    # Vorlese-Sätze aus M2 übernehmen falls vorhanden
+    m2 = _get_modul(sess, ModulTyp.m2_lesen)
+    if m2 and m2.roh_antworten_json:
+        cached = m2.get_roh_antworten()
+        saetze = cached.get("aufgabe", {}).get("vorlese_saetze", [])
+        if saetze:
+            return {"saetze": saetze, "niveau": modul.schwierigkeitsgrad or "B1"}
+
+    # Fallback: eigene Sätze generieren
+    niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
+    vorlese_texte = {
+        "A1": ["Ich heiße Anna.", "Ich wohne in Berlin.", "Das ist mein Haus."],
+        "A2": ["Jeden Morgen trinke ich Kaffee.", "Mein Bruder arbeitet als Arzt."],
+        "B1": ["Die Digitalisierung verändert unsere Arbeitswelt grundlegend.", "Viele Menschen nutzen täglich soziale Medien."],
+        "B2": ["Die wirtschaftlichen Folgen des Klimawandels sind noch nicht vollständig absehbar.", "Bildung gilt als wichtigster Faktor für soziale Mobilität."],
+        "C1": ["Die philosophische Frage nach dem freien Willen beschäftigt Denker seit Jahrhunderten.", "Globale Lieferketten erweisen sich in Krisenzeiten als besonders anfällig."],
+    }
+    saetze = vorlese_texte.get(niveau, vorlese_texte["B1"])
+    modul.schwierigkeitsgrad = niveau
+    modul.status = ModulStatus.laufend
+    await db.commit()
+
+    return {"saetze": saetze, "niveau": niveau}
+
+
+@router.post("/api/m4/{token}/upload")
+async def m4_upload(
+    token: str,
+    audio: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m4_vorlesen)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M4 nicht gefunden.")
+
+    # Datei speichern
+    ext = ".webm"
+    pfad = os.path.join(UPLOAD_DIR, f"m4_{token}_{secrets.token_hex(8)}{ext}")
+    content = await audio.read()
+    max_bytes = settings.max_audio_mb * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Datei zu groß (max. {settings.max_audio_mb} MB).")
+
+    with open(pfad, "wb") as f:
+        f.write(content)
+
+    modul.audio_pfad = pfad
+    modul.status = ModulStatus.laufend
+    await db.commit()
+
+    return {"status": "hochgeladen", "pfad": pfad}
+
+
+@router.post("/api/m4/{token}/analysiere")
+async def m4_analysiere(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m4_vorlesen)
+    if not modul or not modul.audio_pfad:
+        raise HTTPException(status_code=400, detail="Kein Audio hochgeladen.")
+
+    # Vorlese-Text ermitteln
+    m2 = _get_modul(sess, ModulTyp.m2_lesen)
+    vorlesetext = ""
+    if m2 and m2.roh_antworten_json:
+        saetze = m2.get_roh_antworten().get("aufgabe", {}).get("vorlese_saetze", [])
+        vorlesetext = " ".join(saetze)
+
+    analyse = await openai_service.analysiere_vorlesen(
+        modul.audio_pfad, vorlesetext, modul.schwierigkeitsgrad or "B1"
+    )
+
+    # DSGVO: Audio löschen
+    if settings.delete_audio_after_analysis:
+        await session_service.loesche_mediendateien(modul)
+
+    modul.set_ki_analyse(analyse)
+    audio_score = analyse.get("audio_analyse", {})
+    if audio_score:
+        modul.gesamt_score = audio_score.get("gesamt_score", 0)
+        cefr_str = audio_score.get("cefr_niveau", "B1")
+    else:
+        modul.gesamt_score = analyse.get("lesegenauigkeit", 50)
+        cefr_str = _score_to_cefr(modul.gesamt_score)
+
+    modul.cefr_niveau = CEFRNiveau(cefr_str) if cefr_str in CEFRNiveau._value2member_map_ else CEFRNiveau.B1
+    modul.status = ModulStatus.abgeschlossen
+    modul.abgeschlossen_am = datetime.now(timezone.utc)
+    await db.commit()
+
+    if sess.alle_abgeschlossen():
+        await session_service.berechne_gesamt_ergebnis(db, sess)
+
+    return analyse
+
+
+# ── M5: Sprechen ─────────────────────────────────────────────────────────────
+
+@router.get("/api/m5/{token}/thema")
+async def m5_thema(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
+    themen = {
+        "A1": ["Stell dich kurz vor.", "Beschreibe deine Familie.", "Was isst du gerne?"],
+        "A2": ["Erzähl von deinem Alltag.", "Was machst du in deiner Freizeit?", "Beschreibe deine Wohnung."],
+        "B1": ["Erzähl von deinem letzten Wochenende.", "Was sind deine Zukunftspläne?", "Beschreibe eine Person, die du bewunderst."],
+        "B2": ["Diskutiere Vor- und Nachteile der Digitalisierung.", "Was denkst du über Homeoffice?", "Beschreibe eine wichtige Entscheidung in deinem Leben."],
+        "C1": ["Analysiere die Auswirkungen des Klimawandels auf die Gesellschaft.", "Diskutiere ethische Fragen der KI.", "Welche Rolle spielt Sprache in der Identitätsbildung?"],
+    }
+    import random
+    thema_liste = themen.get(niveau, themen["B1"])
+    thema = random.choice(thema_liste)
+
+    modul = _get_modul(sess, ModulTyp.m5_sprechen)
+    if modul:
+        modul.schwierigkeitsgrad = niveau
+        modul.set_roh_antworten({"thema": thema})
+        modul.status = ModulStatus.laufend
+        await db.commit()
+
+    return {"thema": thema, "niveau": niveau, "dauer_sekunden": 90}
+
+
+@router.post("/api/m5/{token}/upload")
+async def m5_upload(
+    token: str,
+    audio: UploadFile = File(...),
+    modus: str = Form("tief"),
+    db: AsyncSession = Depends(get_db),
+):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m5_sprechen)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M5 nicht gefunden.")
+
+    ext = ".webm"
+    pfad = os.path.join(UPLOAD_DIR, f"m5_{token}_{secrets.token_hex(8)}{ext}")
+    content = await audio.read()
+    max_bytes = settings.max_audio_mb * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Datei zu groß.")
+
+    with open(pfad, "wb") as f:
+        f.write(content)
+
+    cached = modul.get_roh_antworten()
+    cached["modus"] = modus
+    modul.set_roh_antworten(cached)
+    modul.audio_pfad = pfad
+    await db.commit()
+
+    return {"status": "hochgeladen"}
+
+
+@router.post("/api/m5/{token}/analysiere")
+async def m5_analysiere(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m5_sprechen)
+    if not modul or not modul.audio_pfad:
+        raise HTTPException(status_code=400, detail="Kein Audio hochgeladen.")
+
+    cached = modul.get_roh_antworten()
+    thema = cached.get("thema", "Freies Sprechen")
+    modus = cached.get("modus", "tief")
+
+    # Transkription
+    transkript_data = await openai_service.transkribiere_audio(modul.audio_pfad)
+    transkript = transkript_data["text"]
+
+    # Vollanalyse
+    analyse = await openai_service.analysiere_sprechen(
+        modul.audio_pfad, transkript, thema, modul.schwierigkeitsgrad or "B1", modus
+    )
+
+    # DSGVO: Audio löschen
+    if settings.delete_audio_after_analysis:
+        await session_service.loesche_mediendateien(modul)
+
+    modul.set_ki_analyse(analyse)
+    text_analyse = analyse.get("text_analyse", {})
+    gesamt_score = text_analyse.get("gesamt_score", 50)
+    modul.gesamt_score = gesamt_score
+    cefr_str = text_analyse.get("cefr_niveau", _score_to_cefr(gesamt_score))
+    modul.cefr_niveau = CEFRNiveau(cefr_str) if cefr_str in CEFRNiveau._value2member_map_ else CEFRNiveau.B1
+    modul.status = ModulStatus.abgeschlossen
+    modul.abgeschlossen_am = datetime.now(timezone.utc)
+    await db.commit()
+
+    if sess.alle_abgeschlossen():
+        await session_service.berechne_gesamt_ergebnis(db, sess)
+
+    return analyse
+
+
+# ── M6: Schreiben ─────────────────────────────────────────────────────────────
+
+@router.get("/api/m6/{token}/aufgabe")
+async def m6_aufgabe(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
+    aufgaben = {
+        "A1": "Schreibe 3–4 Sätze über dich: Wie heißt du? Wo wohnst du? Was machst du?",
+        "A2": "Schreibe eine kurze Nachricht (5–6 Sätze) an einen Freund über dein Wochenende.",
+        "B1": "Schreibe einen kurzen Text (8–10 Sätze) über ein Thema, das dich interessiert.",
+        "B2": "Schreibe einen Meinungstext (12–15 Sätze) zu einem aktuellen gesellschaftlichen Thema.",
+        "C1": "Schreibe einen argumentativen Essay (150–200 Wörter) zu einer komplexen Fragestellung.",
+    }
+    aufgabe_text = aufgaben.get(niveau, aufgaben["B1"])
+
+    modul = _get_modul(sess, ModulTyp.m6_schreiben)
+    if modul:
+        modul.set_roh_antworten({"aufgabe": aufgabe_text})
+        modul.schwierigkeitsgrad = niveau
+        modul.status = ModulStatus.laufend
+        await db.commit()
+
+    return {"aufgabe": aufgabe_text, "niveau": niveau}
+
+
+@router.post("/api/m6/{token}/submit")
+async def m6_submit(
+    token: str,
+    text: str = Form(""),
+    bild: Optional[UploadFile] = File(None),
+    db: AsyncSession = Depends(get_db),
+):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m6_schreiben)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M6 nicht gefunden.")
+
+    bild_pfad = None
+    if bild and bild.filename:
+        content = await bild.read()
+        max_bytes = settings.max_image_mb * 1024 * 1024
+        if len(content) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"Bild zu groß (max. {settings.max_image_mb} MB).")
+        ext = os.path.splitext(bild.filename)[1].lower() or ".jpg"
+        bild_pfad = os.path.join(UPLOAD_DIR, f"m6_{token}_{secrets.token_hex(8)}{ext}")
+        with open(bild_pfad, "wb") as f:
+            f.write(content)
+        modul.bild_pfad = bild_pfad
+
+    cached = modul.get_roh_antworten()
+    aufgabe = cached.get("aufgabe", "")
+
+    analyse = await openai_service.analysiere_schreiben(
+        text=text if text else None,
+        bild_pfad=bild_pfad,
+        aufgabe=aufgabe,
+        niveau=modul.schwierigkeitsgrad or "B1",
+    )
+
+    # DSGVO: Bild löschen
+    if settings.delete_image_after_analysis:
+        await session_service.loesche_mediendateien(modul)
+
+    modul.set_ki_analyse(analyse)
+    modul.gesamt_score = analyse.get("gesamt_score", 50)
+    cefr_str = analyse.get("cefr_niveau", _score_to_cefr(modul.gesamt_score))
+    modul.cefr_niveau = CEFRNiveau(cefr_str) if cefr_str in CEFRNiveau._value2member_map_ else CEFRNiveau.B1
+    modul.status = ModulStatus.abgeschlossen
+    modul.abgeschlossen_am = datetime.now(timezone.utc)
+    await db.commit()
+
+    if sess.alle_abgeschlossen():
+        await session_service.berechne_gesamt_ergebnis(db, sess)
+
+    return analyse
+
+
+# ── Ergebnis ─────────────────────────────────────────────────────────────────
+
+@router.get("/api/ergebnis/{token}")
+async def ergebnis(token: str, db: AsyncSession = Depends(get_db)):
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    module_data = []
+    for m in sorted(sess.module, key=lambda x: x.reihenfolge):
+        module_data.append({
+            "modul": m.modul.value,
+            "status": m.status.value,
+            "cefr": m.cefr_niveau.value if m.cefr_niveau else None,
+            "score": m.gesamt_score,
+            "analyse": m.get_ki_analyse(),
+        })
+
+    return {
+        "token": sess.token,
+        "paket": sess.paket.value,
+        "status": sess.status.value,
+        "gesamt_score": sess.gesamt_score,
+        "gesamt_niveau": sess.gesamt_niveau.value if sess.gesamt_niveau else None,
+        "grob_niveau": sess.grob_niveau.value if sess.grob_niveau else None,
+        "module": module_data,
+        "abgeschlossen_am": sess.abgeschlossen_am.isoformat() if sess.abgeschlossen_am else None,
+    }

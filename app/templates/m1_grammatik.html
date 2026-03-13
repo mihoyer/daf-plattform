@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M1 Grammatik & Wortschatz – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <div class="badge badge-primary">📝 M1 – Grammatik &amp; Wortschatz</div>
+  </div>
+</nav>
+
+<div class="container-sm" style="padding-top:2rem; padding-bottom:4rem;">
+  <!-- Lade-Bereich -->
+  <div id="lade-bereich" class="text-center" style="padding:4rem 0;">
+    <div class="spinner" style="margin:0 auto 1rem;"></div>
+    <p class="text-muted" id="lade-text">Aufgaben werden generiert…</p>
+  </div>
+
+  <!-- Aufgaben-Bereich -->
+  <div id="aufgaben-bereich" class="hidden">
+    <div class="card mb-6" style="background:var(--primary-lighter);">
+      <div class="flex justify-between items-center flex-wrap gap-2">
+        <div>
+          <h2 class="mb-1">Grammatik &amp; Wortschatz</h2>
+          <p class="text-sm text-muted" id="aufgaben-info">–</p>
+        </div>
+        <div class="flex gap-2 items-center">
+          <span class="badge badge-gray" id="fortschritt-badge">0 / 0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fortschrittsbalken -->
+    <div class="score-bar mb-6">
+      <div class="score-bar-fill high" id="fortschritt-balken" style="width:0%;"></div>
+    </div>
+
+    <!-- Aufgabe -->
+    <div id="aufgabe-container"></div>
+
+    <!-- Navigation -->
+    <div class="flex justify-between mt-6">
+      <button class="btn btn-outline" id="btn-zurueck" onclick="vorherigeAufgabe()" disabled>← Zurück</button>
+      <button class="btn btn-primary" id="btn-weiter" onclick="naechsteAufgabe()" disabled>Weiter →</button>
+    </div>
+  </div>
+
+  <!-- Analyse-Overlay -->
+  <div id="analyse-overlay" class="analyse-overlay hidden">
+    <div class="analyse-card">
+      <div class="spinner"></div>
+      <h3>Auswertung läuft…</h3>
+      <p class="text-muted mt-2">Deine Antworten werden analysiert.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const token = '{{ token }}';
+let aufgaben = [];
+let aktuelleIndex = 0;
+let antworten = {};
+
+async function ladeAufgaben() {
+  try {
+    const res = await fetch(`/api/m1/aufgaben/${token}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    aufgaben = data.aufgaben;
+    document.getElementById('aufgaben-info').textContent = `${aufgaben.length} Aufgaben · Niveau: ${data.niveau || 'adaptiv'}`;
+    document.getElementById('lade-bereich').classList.add('hidden');
+    document.getElementById('aufgaben-bereich').classList.remove('hidden');
+    zeigeAufgabe(0);
+  } catch (e) {
+    document.getElementById('lade-text').textContent = 'Fehler beim Laden der Aufgaben. Bitte Seite neu laden.';
+  }
+}
+
+function zeigeAufgabe(index) {
+  aktuelleIndex = index;
+  const aufgabe = aufgaben[index];
+  const total = aufgaben.length;
+
+  document.getElementById('fortschritt-badge').textContent = `${index + 1} / ${total}`;
+  document.getElementById('fortschritt-balken').style.width = `${((index + 1) / total) * 100}%`;
+  document.getElementById('btn-zurueck').disabled = index === 0;
+
+  const container = document.getElementById('aufgabe-container');
+  container.innerHTML = `
+    <div class="card">
+      <div class="text-xs text-muted mb-2">Aufgabe ${index + 1} von ${total} · ${aufgabe.kategorie || ''}</div>
+      <h3 class="mb-4">${aufgabe.frage}</h3>
+      <div id="optionen-liste">
+        ${aufgabe.optionen.map((opt, i) => `
+          <label class="mc-option ${antworten[index] === i ? 'selected' : ''}" onclick="waehleAntwort(${index}, ${i})">
+            <input type="radio" name="antwort_${index}" value="${i}" ${antworten[index] === i ? 'checked' : ''}>
+            ${opt}
+          </label>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  const istLetzte = index === total - 1;
+  const hatAntwort = antworten[index] !== undefined;
+  document.getElementById('btn-weiter').disabled = !hatAntwort;
+  document.getElementById('btn-weiter').textContent = istLetzte ? 'Auswertung starten →' : 'Weiter →';
+}
+
+function waehleAntwort(aufgabeIndex, optionIndex) {
+  antworten[aufgabeIndex] = optionIndex;
+  document.querySelectorAll('.mc-option').forEach((el, i) => {
+    el.classList.toggle('selected', i === optionIndex);
+  });
+  document.getElementById('btn-weiter').disabled = false;
+}
+
+function naechsteAufgabe() {
+  if (aktuelleIndex < aufgaben.length - 1) {
+    zeigeAufgabe(aktuelleIndex + 1);
+  } else {
+    sendeAntworten();
+  }
+}
+
+function vorherigeAufgabe() {
+  if (aktuelleIndex > 0) zeigeAufgabe(aktuelleIndex - 1);
+}
+
+async function sendeAntworten() {
+  document.getElementById('analyse-overlay').classList.remove('hidden');
+  const payload = aufgaben.map((a, i) => ({
+    aufgabe_id: a.id,
+    antwort_index: antworten[i] ?? -1,
+  }));
+
+  try {
+    const res = await fetch(`/api/m1/auswerten/${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ antworten: payload }),
+    });
+    const data = await res.json();
+    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+  } catch (e) {
+    document.getElementById('analyse-overlay').classList.add('hidden');
+    alert('Fehler bei der Auswertung. Bitte versuche es erneut.');
+  }
+}
+
+ladeAufgaben();
+</script>
+</body>
+</html>

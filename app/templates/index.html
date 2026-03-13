@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DaF Sprachdiagnostik – Professionelle Sprachstandsanalyse</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand">
+      <div class="brand-icon">🎓</div>
+      DaF Sprachdiagnostik
+    </a>
+    <div class="navbar-links">
+      <a href="#module">Module</a>
+      <a href="#pakete">Pakete</a>
+      <a href="/dsgvo">Datenschutz</a>
+      <a href="/admin/login" class="btn btn-outline btn-sm">Admin</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="container text-center">
+    <div class="badge badge-primary mb-4" style="margin: 0 auto 1.5rem; display:inline-flex;">
+      🤖 KI-gestützte Sprachanalyse
+    </div>
+    <h1>Professionelle Einstufung<br>des Deutschen Sprachniveaus</h1>
+    <p style="max-width:600px; margin: 1rem auto 2rem;">
+      Anonyme, DSGVO-konforme Sprachstandsanalyse nach CEFR-Rahmen (A1–C2) –
+      mit 6 Kompetenzbereichen, adaptiver Testlogik und detailliertem Einstufungsbericht.
+    </p>
+    <div class="flex gap-3 justify-center flex-wrap">
+      <a href="/paket" class="btn btn-primary btn-lg">Jetzt starten</a>
+      <a href="#module" class="btn btn-outline btn-lg" style="color:white; border-color:rgba(255,255,255,.5);">Mehr erfahren</a>
+    </div>
+    <div class="flex gap-4 justify-center mt-8 flex-wrap" style="margin-top:2.5rem;">
+      <div style="color:rgba(255,255,255,.8); font-size:.9rem;">✓ Anonym &amp; DSGVO-konform</div>
+      <div style="color:rgba(255,255,255,.8); font-size:.9rem;">✓ Keine Registrierung nötig</div>
+      <div style="color:rgba(255,255,255,.8); font-size:.9rem;">✓ Sofortiger Bericht</div>
+      <div style="color:rgba(255,255,255,.8); font-size:.9rem;">✓ PDF-Export</div>
+    </div>
+  </div>
+</section>
+
+<!-- Module -->
+<section class="section" id="module">
+  <div class="container">
+    <div class="text-center mb-8">
+      <h2>6 Kompetenzbereiche</h2>
+      <p class="text-muted mt-2">Je nach gewähltem Paket werden alle oder ausgewählte Module durchgeführt.</p>
+    </div>
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:1.25rem;">
+      <div class="card">
+        <div class="flex items-center gap-3 mb-3">
+          <div style="width:44px;height:44px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">📝</div>
+          <div><div class="card-title">M1 – Grammatik &amp; Wortschatz</div><div class="text-xs text-muted">Multiple Choice · Adaptiv</div></div>
+        </div>
+        <p class="text-sm text-muted">Adaptive MC-Aufgaben zu Verbformen, Kasus, Präpositionen, Satzbau und Wortschatz. Startet bei A2/B1 und passt sich dynamisch an.</p>
+      </div>
+      <div class="card">
+        <div class="flex items-center gap-3 mb-3">
+          <div style="width:44px;height:44px;background:#f0fdf4;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">📖</div>
+          <div><div class="card-title">M2 – Lesen &amp; Leseverstehen</div><div class="text-xs text-muted">Lesetext · Verständnisfragen</div></div>
+        </div>
+        <p class="text-sm text-muted">Niveau-adaptiver Lesetext mit Verständnisfragen. Prüft Lesekompetenz, Textverständnis und Schlussfolgerungsvermögen.</p>
+      </div>
+      <div class="card">
+        <div class="flex items-center gap-3 mb-3">
+          <div style="width:44px;height:44px;background:#fef3c7;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">🎧</div>
+          <div><div class="card-title">M3 – Hörverstehen</div><div class="text-xs text-muted">Audio · Verständnisfragen</div></div>
+        </div>
+        <p class="text-sm text-muted">KI-generierter Hörtext (OpenAI TTS) mit anschließenden Verständnisfragen. Prüft auditives Sprachverständnis.</p>
+      </div>
+      <div class="card">
+        <div class="flex items-center gap-3 mb-3">
+          <div style="width:44px;height:44px;background:#fce7f3;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">🔊</div>
+          <div><div class="card-title">M4 – Vorlesen</div><div class="text-xs text-muted">Audio-Aufnahme · Aussprache</div></div>
+        </div>
+        <p class="text-sm text-muted">Vorgegebener Text wird vorgelesen und aufgenommen. GPT-4o bewertet Aussprache, Prosodie, Rhythmus und Fluss.</p>
+      </div>
+      <div class="card">
+        <div class="flex items-center gap-3 mb-3">
+          <div style="width:44px;height:44px;background:#ede9fe;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">🎙️</div>
+          <div><div class="card-title">M5 – Freies Sprechen</div><div class="text-xs text-muted">Audio-Aufnahme · KI-Analyse</div></div>
+        </div>
+        <p class="text-sm text-muted">Freie Sprachprobe zu einem Thema. Analyse von Grammatik, Wortschatz, Satzbau, Pragmatik und Aussprache.</p>
+      </div>
+      <div class="card">
+        <div class="flex items-center gap-3 mb-3">
+          <div style="width:44px;height:44px;background:#fff7ed;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">✍️</div>
+          <div><div class="card-title">M6 – Schreiben</div><div class="text-xs text-muted">Text oder Handschrift-Foto</div></div>
+        </div>
+        <p class="text-sm text-muted">Schriftliche Aufgabe als Texteingabe oder Handschrift-Foto. Analyse von Grammatik, Kohärenz, Rechtschreibung und Stil.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Pakete -->
+<section class="section" id="pakete" style="background:var(--gray-50);">
+  <div class="container">
+    <div class="text-center mb-8">
+      <h2>Pakete &amp; Preise</h2>
+      <p class="text-muted mt-2">Wähle das passende Paket für deine Anforderungen.</p>
+    </div>
+    <div class="paket-grid">
+      <div class="paket-card">
+        <div class="text-muted text-sm font-bold mb-2">BASIS</div>
+        <div class="paket-preis">6 CHF <span>/ Analyse</span></div>
+        <p class="text-sm text-muted mb-4">Schnelle Grundeinstufung mit den wichtigsten Kompetenzen.</p>
+        <ul class="paket-features">
+          <li>M1 Grammatik &amp; Wortschatz</li>
+          <li>M5 Freies Sprechen</li>
+          <li>CEFR-Einstufung</li>
+          <li>PDF-Bericht</li>
+        </ul>
+        <a href="/paket?p=basis" class="btn btn-outline w-full mt-6">Auswählen</a>
+      </div>
+      <div class="paket-card featured">
+        <div class="paket-badge">Empfohlen</div>
+        <div class="text-muted text-sm font-bold mb-2">STANDARD</div>
+        <div class="paket-preis">10 CHF <span>/ Analyse</span></div>
+        <p class="text-sm text-muted mb-4">Umfassende Analyse aller Kernkompetenzen.</p>
+        <ul class="paket-features">
+          <li>M1 Grammatik &amp; Wortschatz</li>
+          <li>M2 Lesen &amp; Leseverstehen</li>
+          <li>M4 Vorlesen</li>
+          <li>M5 Freies Sprechen</li>
+          <li>Detaillierter Skill-Breakdown</li>
+          <li>PDF + JSON Export</li>
+        </ul>
+        <a href="/paket?p=standard" class="btn btn-primary w-full mt-6">Auswählen</a>
+      </div>
+      <div class="paket-card">
+        <div class="text-muted text-sm font-bold mb-2">PREMIUM</div>
+        <div class="paket-preis">14 CHF <span>/ Analyse</span></div>
+        <p class="text-sm text-muted mb-4">Vollständige Diagnostik aller 6 Kompetenzbereiche.</p>
+        <ul class="paket-features">
+          <li>Alle 6 Module</li>
+          <li>Hörverstehen (Audio)</li>
+          <li>Schreiben inkl. Handschrift</li>
+          <li>Tiefenanalyse Aussprache</li>
+          <li>Adaptive Zusatzfragen</li>
+          <li>PDF + JSON Export</li>
+        </ul>
+        <a href="/paket?p=premium" class="btn btn-dark w-full mt-6">Auswählen</a>
+      </div>
+    </div>
+    <p class="text-center text-sm text-muted mt-6">Alle Preise inkl. MwSt. · Zahlung per Kreditkarte (Stripe) · CHF und EUR</p>
+  </div>
+</section>
+
+<!-- DSGVO-Hinweis -->
+<section class="section">
+  <div class="container-sm">
+    <div class="card" style="border-left: 4px solid var(--primary-light);">
+      <div class="flex gap-3 items-center mb-3">
+        <span style="font-size:1.5rem;">🔒</span>
+        <h3>Datenschutz &amp; Anonymität</h3>
+      </div>
+      <p class="text-sm text-muted">
+        Diese Plattform wurde nach dem Prinzip <strong>Privacy by Design</strong> entwickelt.
+        Es werden <strong>keine personenbezogenen Daten</strong> erfasst oder gespeichert.
+        Audio- und Bilddateien werden ausschließlich zur Analyse verwendet und danach
+        <strong>automatisch gelöscht</strong>. Alle Analysen erfolgen anonym über eine
+        Session-ID ohne Personenbezug.
+        <a href="/dsgvo">Vollständige Datenschutzerklärung →</a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div>
+      <strong style="color:white;">DaF Sprachdiagnostik</strong><br>
+      <span style="font-size:.85rem;">Professionelle Sprachstandsanalyse</span>
+    </div>
+    <div class="flex gap-4 text-sm">
+      <a href="/dsgvo">Datenschutz</a>
+      <a href="/dsgvo#impressum">Impressum</a>
+      <a href="/admin/login">Admin</a>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

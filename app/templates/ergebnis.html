@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Einstufungsbericht – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <div class="flex gap-2" id="export-buttons"></div>
+  </div>
+</nav>
+
+<div class="container" style="padding-top:2rem; padding-bottom:4rem; max-width:900px;">
+  <div id="lade-bereich" class="text-center" style="padding:4rem 0;">
+    <div class="spinner" style="margin:0 auto 1rem;"></div>
+    <p class="text-muted">Bericht wird geladen…</p>
+  </div>
+
+  <div id="bericht-bereich" class="hidden">
+    <!-- Header -->
+    <div class="flex justify-between items-start flex-wrap gap-4 mb-8">
+      <div>
+        <h1 id="bericht-titel">Einstufungsbericht</h1>
+        <p class="text-muted mt-1" id="bericht-datum">–</p>
+      </div>
+      <div class="flex gap-2 flex-wrap" id="badges"></div>
+    </div>
+
+    <!-- Gesamtscore + CEFR -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.5rem;">
+      <div class="card text-center">
+        <div class="text-sm text-muted mb-1">Gesamtscore</div>
+        <div id="gesamtscore" style="font-size:3rem; font-weight:800; color:var(--primary);">–</div>
+        <div class="text-sm text-muted">von 100 Punkten</div>
+        <div class="score-bar mt-3">
+          <div class="score-bar-fill" id="gesamtscore-bar" style="width:0%;"></div>
+        </div>
+      </div>
+      <div class="card text-center">
+        <div class="text-sm text-muted mb-1">CEFR-Einstufung</div>
+        <div id="cefr-level" style="font-size:3rem; font-weight:800;">–</div>
+        <div id="cefr-beschreibung" class="text-sm text-muted">–</div>
+      </div>
+    </div>
+
+    <!-- Gesamteinschätzung -->
+    <div class="card mb-6">
+      <h3 class="mb-3">🔍 Gesamteinschätzung</h3>
+      <p id="gesamteinschaetzung" class="text-muted">–</p>
+    </div>
+
+    <!-- Modul-Ergebnisse -->
+    <div id="module-bereich"></div>
+
+    <!-- Stärken & Schwächen -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.5rem;">
+      <div class="card">
+        <h3 class="mb-3" style="color:var(--success);">✅ Stärken</h3>
+        <ul id="staerken-liste" style="list-style:none; display:flex; flex-direction:column; gap:.5rem;"></ul>
+      </div>
+      <div class="card">
+        <h3 class="mb-3" style="color:var(--warning);">⚠️ Verbesserungsbedarf</h3>
+        <ul id="schwaechen-liste" style="list-style:none; display:flex; flex-direction:column; gap:.5rem;"></ul>
+      </div>
+    </div>
+
+    <!-- Empfehlungen -->
+    <div class="card mb-6">
+      <h3 class="mb-3">📚 Empfehlungen</h3>
+      <div id="empfehlungen-liste" style="display:flex; flex-direction:column; gap:.75rem;"></div>
+    </div>
+
+    <!-- Export -->
+    <div class="card" style="background:var(--gray-50);">
+      <h3 class="mb-4">📥 Bericht exportieren</h3>
+      <div class="flex gap-3 flex-wrap">
+        <a id="btn-pdf" href="#" class="btn btn-primary" target="_blank">📄 PDF herunterladen</a>
+        <a id="btn-json" href="#" class="btn btn-outline" target="_blank">{ } JSON exportieren</a>
+      </div>
+      <p class="text-xs text-muted mt-3">🔒 Nach dem Export werden alle Daten dieser Session gelöscht.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const token = '{{ token }}';
+
+const CEFR_FARBEN = { A1:'#dc2626', A2:'#ea580c', B1:'#d97706', B2:'#65a30d', C1:'#0891b2', C2:'#7c3aed' };
+const MODUL_NAMEN = {
+  m1_grammatik: '📝 Grammatik & Wortschatz',
+  m2_lesen: '📖 Lesen & Leseverstehen',
+  m3_hoerverstehen: '🎧 Hörverstehen',
+  m4_vorlesen: '🔊 Vorlesen',
+  m5_sprechen: '🎙️ Freies Sprechen',
+  m6_schreiben: '✍️ Schreiben',
+};
+
+async function ladeBericht() {
+  try {
+    const res = await fetch(`/api/ergebnis/${token}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    zeigeBericht(data);
+  } catch (e) {
+    document.getElementById('lade-bereich').innerHTML =
+      '<div class="alert alert-danger"><span>⚠️</span><div>Bericht nicht gefunden oder abgelaufen.</div></div>';
+  }
+}
+
+function scoreKlasse(score) {
+  if (score >= 70) return 'high';
+  if (score >= 40) return 'medium';
+  return 'low';
+}
+
+function zeigeBericht(data) {
+  document.getElementById('lade-bereich').classList.add('hidden');
+  document.getElementById('bericht-bereich').classList.remove('hidden');
+
+  // Header
+  document.getElementById('bericht-titel').textContent = `Einstufungsbericht – ${data.paket_name || 'Analyse'}`;
+  document.getElementById('bericht-datum').textContent = new Date().toLocaleDateString('de-DE', { year:'numeric', month:'long', day:'numeric' });
+
+  // Badges
+  const badgesEl = document.getElementById('badges');
+  badgesEl.innerHTML = `
+    <span class="badge badge-primary">${data.paket_name || 'Analyse'}</span>
+    <span class="badge badge-gray">Session ${token.substring(0,8)}…</span>
+  `;
+
+  // Gesamtscore
+  const score = Math.round(data.gesamtscore || 0);
+  document.getElementById('gesamtscore').textContent = score;
+  const bar = document.getElementById('gesamtscore-bar');
+  bar.style.width = score + '%';
+  bar.className = `score-bar-fill ${scoreKlasse(score)}`;
+
+  // CEFR
+  const cefr = data.cefr_niveau || '–';
+  const cefrEl = document.getElementById('cefr-level');
+  cefrEl.textContent = cefr;
+  cefrEl.style.color = CEFR_FARBEN[cefr] || 'var(--gray-700)';
+  document.getElementById('cefr-beschreibung').textContent = data.cefr_beschreibung || '';
+
+  // Gesamteinschätzung
+  document.getElementById('gesamteinschaetzung').textContent = data.gesamteinschaetzung || '–';
+
+  // Module
+  const moduleEl = document.getElementById('module-bereich');
+  if (data.module_ergebnisse && data.module_ergebnisse.length) {
+    data.module_ergebnisse.forEach(modul => {
+      const div = document.createElement('div');
+      div.className = 'card mb-4';
+      const modulScore = Math.round(modul.score || 0);
+      let skillsHTML = '';
+      if (modul.skills && modul.skills.length) {
+        skillsHTML = `<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:.75rem; margin-top:1rem;">
+          ${modul.skills.map(s => `
+            <div style="background:var(--gray-50); border-radius:var(--radius); padding:.75rem;">
+              <div class="flex justify-between mb-1">
+                <span class="text-xs font-bold">${s.name}</span>
+                <span class="text-xs font-bold" style="color:${s.score >= 7 ? 'var(--success)' : s.score >= 4 ? 'var(--warning)' : 'var(--danger)'};">${s.score}/10</span>
+              </div>
+              <div class="score-bar" style="height:4px;">
+                <div class="score-bar-fill ${scoreKlasse(s.score * 10)}" style="width:${s.score * 10}%;"></div>
+              </div>
+              ${s.begruendung ? `<p class="text-xs text-muted mt-1">${s.begruendung}</p>` : ''}
+            </div>
+          `).join('')}
+        </div>`;
+      }
+      let audioHTML = '';
+      if (modul.aussprache_analyse) {
+        const a = modul.aussprache_analyse;
+        audioHTML = `
+          <div style="background:var(--primary-lighter); border-radius:var(--radius); padding:1rem; margin-top:1rem; border-left:3px solid var(--primary-light);">
+            <div class="flex items-center gap-2 mb-2"><span>🎙️</span><strong class="text-sm">Aussprache-Analyse (Audio)</strong></div>
+            <p class="text-sm text-muted mb-2">${a.zusammenfassung || ''}</p>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:.5rem;">
+              ${[['Verständlichkeit', a.verstaendlichkeit], ['Fluss', a.fluss], ['Akzent', a.akzent], ['Intonation', a.intonation]]
+                .filter(([,v]) => v !== undefined)
+                .map(([label, val]) => `
+                  <div style="background:white; border-radius:6px; padding:.5rem; text-align:center;">
+                    <div class="text-xs text-muted">${label}</div>
+                    <div class="font-bold" style="color:${val >= 7 ? 'var(--success)' : val >= 4 ? 'var(--warning)' : 'var(--danger)'};">${val}/10</div>
+                  </div>
+                `).join('')}
+            </div>
+            ${a.fehler && a.fehler.length ? `<p class="text-xs text-muted mt-2">Phonetische Auffälligkeiten: ${a.fehler.join(', ')}</p>` : ''}
+          </div>`;
+      }
+      div.innerHTML = `
+        <div class="flex justify-between items-center mb-3">
+          <h3>${MODUL_NAMEN[modul.modul] || modul.modul}</h3>
+          <div class="flex items-center gap-2">
+            <span class="badge badge-gray">${modul.cefr_niveau || ''}</span>
+            <span style="font-size:1.3rem; font-weight:800; color:${modulScore >= 70 ? 'var(--success)' : modulScore >= 40 ? 'var(--warning)' : 'var(--danger)'};">${modulScore}/100</span>
+          </div>
+        </div>
+        <div class="score-bar mb-3">
+          <div class="score-bar-fill ${scoreKlasse(modulScore)}" style="width:${modulScore}%;"></div>
+        </div>
+        ${modul.zusammenfassung ? `<p class="text-sm text-muted">${modul.zusammenfassung}</p>` : ''}
+        ${skillsHTML}
+        ${audioHTML}
+      `;
+      moduleEl.appendChild(div);
+    });
+  }
+
+  // Stärken
+  const staerkenEl = document.getElementById('staerken-liste');
+  (data.staerken || []).forEach(s => {
+    const li = document.createElement('li');
+    li.className = 'text-sm';
+    li.innerHTML = `<span style="color:var(--success); margin-right:.4rem;">✓</span>${s}`;
+    staerkenEl.appendChild(li);
+  });
+
+  // Schwächen
+  const schwaechenEl = document.getElementById('schwaechen-liste');
+  (data.schwaechen || []).forEach(s => {
+    const li = document.createElement('li');
+    li.className = 'text-sm';
+    li.innerHTML = `<span style="color:var(--warning); margin-right:.4rem;">→</span>${s}`;
+    schwaechenEl.appendChild(li);
+  });
+
+  // Empfehlungen
+  const empfEl = document.getElementById('empfehlungen-liste');
+  (data.empfehlungen || []).forEach(e => {
+    const div = document.createElement('div');
+    div.className = 'flex gap-2 items-start';
+    div.innerHTML = `<span style="color:var(--primary); flex-shrink:0;">📌</span><p class="text-sm">${e}</p>`;
+    empfEl.appendChild(div);
+  });
+
+  // Export-Links
+  document.getElementById('btn-pdf').href = `/export/pdf/${token}`;
+  document.getElementById('btn-json').href = `/export/json/${token}`;
+}
+
+ladeBericht();
+</script>
+</body>
+</html>
