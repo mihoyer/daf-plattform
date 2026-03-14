@@ -273,7 +273,7 @@ def _berechne_lesegenauigkeit(original: str, transkript: str) -> float:
     return round(treffer / len(orig_woerter) * 100, 1)
 
 
-# ── Lesen-Analyse (M2) ───────────────────────────────────────────────────────
+## ── Lesen-Analyse (M2) ────────────────────────────────────────────
 
 async def analysiere_lesen(
     lesetext: str,
@@ -281,7 +281,7 @@ async def analysiere_lesen(
     antworten: dict,
     niveau: str = "B1",
 ) -> dict:
-    """Wertet Leseverstehen-Antworten aus und gibt CEFR-Bewertung."""
+    """Wertet Leseverstehen-Antworten aus mit GPT-basierter Qualitätsbewertung."""
     korrekt = 0
     details = []
     for frage in fragen:
@@ -290,48 +290,99 @@ async def analysiere_lesen(
         ist_korrekt = gewaehlt == frage.get("korrekt", -99)
         if ist_korrekt:
             korrekt += 1
+        korrekte_option = frage.get("optionen", [])
+        korrekte_option_text = korrekte_option[frage.get("korrekt", 0)] if korrekte_option else ""
+        gewaehlt_text = korrekte_option[gewaehlt] if 0 <= gewaehlt < len(korrekte_option) else "(keine Antwort)"
         details.append({
             "id": frage["id"],
             "frage": frage["frage"],
             "gewaehlt": gewaehlt,
+            "gewaehlt_text": gewaehlt_text,
             "korrekt": frage.get("korrekt"),
+            "korrekt_text": korrekte_option_text,
             "ist_korrekt": ist_korrekt,
+            "erklaerung": frage.get("erklaerung", ""),
         })
 
     total = len(fragen)
-    prozent = (korrekt / total * 100) if total > 0 else 0
+    rohprozent = (korrekt / total * 100) if total > 0 else 0
 
-    if prozent >= 80:
-        cefr = "B2"
-    elif prozent >= 55:
-        cefr = "B1"
-    elif prozent >= 35:
-        cefr = "A2"
-    else:
-        cefr = "A1"
+    # GPT bewertet die Antwortqualität und gibt einen kalibrierten Score
+    try:
+        details_text = "\n".join(
+            f"Frage {d['id']}: '{d['frage']}' → Antwort: '{d['gewaehlt_text']}' ({'korrekt' if d['ist_korrekt'] else 'falsch, richtig wäre: ' + d['korrekt_text']})"
+            for d in details
+        )
+        prompt = f"""Du bist ein DaF-Prüfer. Bewerte das Leseverstehen eines Lernenden auf CEFR-Niveau {niveau}.
+
+{f'Lesetext: {lesetext[:500]}...' if lesetext else ''}
+
+Antworten ({korrekt}/{total} korrekt):
+{details_text}
+
+Gib eine faire, pädagogisch kalibrierte Bewertung. Berücksichtige:
+- Schwierigkeit des Textes und der Fragen für Niveau {niveau}
+- Qualität der falschen Antworten (knappe Fehler vs. komplette Missverständnisse)
+- Rohprozent: {rohprozent:.0f}%
+
+Antworte NUR mit JSON:
+{
+  "gesamt_score": 0.0,
+  "cefr_niveau": "B1",
+  "gesamteinschaetzung": "",
+  "staerken": [],
+  "schwaechen": [],
+  "empfehlungen": []
+}"""
+        response = await client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.3,
+        )
+        gpt_bewertung = json.loads(response.choices[0].message.content)
+        score = float(gpt_bewertung.get("gesamt_score", rohprozent))
+        cefr = gpt_bewertung.get("cefr_niveau", "B1")
+    except Exception as e:
+        print(f"[Lesen-GPT-Bewertung fehlgeschlagen]: {e}")
+        score = rohprozent
+        gpt_bewertung = {}
+        if rohprozent >= 80:
+            cefr = "B2"
+        elif rohprozent >= 55:
+            cefr = "B1"
+        elif rohprozent >= 35:
+            cefr = "A2"
+        else:
+            cefr = "A1"
 
     return {
-        "score": round(prozent, 1),
+        "score": round(score, 1),
         "korrekt": korrekt,
         "total": total,
         "cefr": cefr,
         "details": details,
+        "gesamteinschaetzung": gpt_bewertung.get("gesamteinschaetzung", ""),
+        "staerken": gpt_bewertung.get("staerken", []),
+        "schwaechen": gpt_bewertung.get("schwaechen", []),
+        "empfehlungen": gpt_bewertung.get("empfehlungen", []),
     }
 
 
-# ── Hörverstehen-Analyse (M3) ────────────────────────────────────────────────
+# ── Hörverstehen-Analyse (M3) ──────────────────────────────────────────
 
 async def analysiere_hoerverstehen(
     fragen: list[dict],
     antworten: dict,
     niveau: str = "B1",
 ) -> dict:
-    """Wertet Hörverstehen-Antworten aus."""
+    """Wertet Hörverstehen-Antworten mit GPT-basierter Qualitätsbewertung aus."""
     return await analysiere_lesen(
         lesetext="",
         fragen=fragen,
         antworten=antworten,
         niveau=niveau,
+    )au=niveau,
     )
 
 
