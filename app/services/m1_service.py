@@ -46,13 +46,31 @@ async def generiere_items(niveau: str = "B1", hilfssprache: str = "de") -> list[
         sprach_name = sprach_namen.get(hilfssprache, hilfssprache)
         hilfs_hinweis = f'\nFüge für jede Frage ein Feld "hinweis_{hilfssprache}" hinzu mit einer kurzen Erklärung der Aufgabe auf {sprach_name}.'
 
+    # Zufälliges Thema und Grammatikfokus für Variation
+    themen = [
+        "Alltag und Familie", "Arbeit und Beruf", "Reisen und Urlaub",
+        "Gesundheit und Sport", "Umwelt und Natur", "Technologie und Medien",
+        "Essen und Kochen", "Wohnen und Stadt", "Bildung und Schule",
+        "Freizeit und Hobbys", "Einkaufen und Konsum", "Kultur und Gesellschaft",
+    ]
+    grammatik_fokus = [
+        "Verbkonjugation und Tempus", "Kasus und Artikel", "Präpositionen",
+        "Modalverben und Infinitivkonstruktionen", "Nebensätze und Konjunktionen",
+        "Adjektivdeklination", "Passiv und Konjunktiv", "Wortschatz und Kollokationen",
+    ]
+    thema = random.choice(themen)
+    fokus = random.choice(grammatik_fokus)
+
     prompt = f"""Du bist ein DaF-Experte. Erstelle genau 10 Multiple-Choice-Items zum Testen von Grammatik und Wortschatz auf CEFR-Niveau {niveau}.
+
+Thematischer Kontext: {thema}
+Grammatischer Schwerpunkt: {fokus}
 
 Anforderungen:
 - Jedes Item hat genau 4 Antwortoptionen (A, B, C, D)
 - Genau eine Option ist korrekt
 - Die Distraktoren sind plausibel (typische Lernerfehler)
-- Themen: Verbkonjugation, Kasus, Artikel, Präpositionen, Wortschatz, Tempus
+- Bette die Fragen in den Kontext "{thema}" ein (authentische Sätze)
 - Niveau {niveau}: {_niveau_beschreibung(niveau)}
 {hilfs_hinweis}
 
