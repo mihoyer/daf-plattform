@@ -740,25 +740,111 @@ async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
 </html>"""
 
     try:
-        import subprocess
-        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
-            f.write(html)
-            html_pfad = f.name
-        pdf_pfad = html_pfad.replace(".html", ".pdf")
-        subprocess.run(
-            ["weasyprint", html_pfad, pdf_pfad],
-            capture_output=True, timeout=30, check=True
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import cm
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+        pdf_buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            pdf_buffer, pagesize=A4,
+            leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm
         )
-        with open(pdf_pfad, "rb") as f:
-            pdf_bytes = f.read()
-        os.unlink(html_pfad)
-        os.unlink(pdf_pfad)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Titel
+        title_style = ParagraphStyle('title', parent=styles['Title'], fontSize=20, textColor=colors.HexColor('#1e3a5f'), spaceAfter=6)
+        sub_style = ParagraphStyle('sub', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#6b7280'), spaceAfter=20)
+        story.append(Paragraph('Einstufungsbericht – DaF Sprachdiagnostik', title_style))
+        story.append(Paragraph(f'Erstellt am {datum}  |  Session: {token[:8]}…', sub_style))
+        story.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#e5e7eb'), spaceAfter=16))
+
+        # Gesamtscore-Tabelle
+        score_data = [['Gesamtscore', 'CEFR-Niveau'], [f'{gesamt_score}/100', gesamt_niveau]]
+        score_table = Table(score_data, colWidths=[8*cm, 8*cm])
+        score_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f0f4ff')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#374151')),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 10),
+            ('FONTSIZE', (0,1), (-1,1), 22),
+            ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
+            ('TEXTCOLOR', (0,1), (0,1), colors.HexColor('#2563eb')),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ROWBACKGROUND', (0,1), (-1,1), colors.HexColor('#f8fafc')),
+            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#e5e7eb')),
+            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e5e7eb')),
+            ('TOPPADDING', (0,0), (-1,-1), 10),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ]))
+        story.append(score_table)
+        story.append(Spacer(1, 20))
+
+        # Modul-Ergebnisse
+        h2_style = ParagraphStyle('h2', parent=styles['Heading2'], fontSize=13, textColor=colors.HexColor('#374151'), spaceBefore=12, spaceAfter=8)
+        body_style = ParagraphStyle('body', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#374151'), spaceAfter=4)
+        muted_style = ParagraphStyle('muted', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#6b7280'), spaceAfter=4)
+
+        story.append(Paragraph('Modul-Ergebnisse', h2_style))
+        story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#e5e7eb'), spaceAfter=8))
+
+        MODUL_NAMEN = {
+            'm1_grammatik': 'Grammatik & Wortschatz',
+            'm2_lesen': 'Lesen & Leseverstehen',
+            'm3_hoerverstehen': 'Hörverstehen',
+            'm4_vorlesen': 'Vorlesen',
+            'm5_sprechen': 'Freies Sprechen',
+            'm6_schreiben': 'Schreiben',
+        }
+        for m in sorted(sess.module, key=lambda x: x.reihenfolge):
+            m_score = round(m.gesamt_score or 0)
+            m_cefr = m.cefr_niveau.value if m.cefr_niveau else '–'
+            m_name = MODUL_NAMEN.get(m.modul.value, m.modul.value)
+            analyse = m.get_ki_analyse() or {}
+
+            story.append(Paragraph(f'<b>{m_name}</b> — Score: {m_score}/100 | CEFR: {m_cefr}', body_style))
+
+            # Gesamteinschätzung
+            einschaetzung = (
+                analyse.get('gesamteinschaetzung') or
+                analyse.get('text_analyse', {}).get('gesamteinschaetzung') or
+                analyse.get('zusammenfassung') or ''
+            )
+            if einschaetzung:
+                story.append(Paragraph(einschaetzung, muted_style))
+
+            # Stärken
+            staerken = analyse.get('staerken') or analyse.get('text_analyse', {}).get('staerken') or []
+            if staerken:
+                story.append(Paragraph(f'<b>Stärken:</b> {" | ".join(staerken)}', muted_style))
+
+            # Schwächen
+            schwaechen = analyse.get('schwaechen') or analyse.get('text_analyse', {}).get('schwaechen') or []
+            if schwaechen:
+                story.append(Paragraph(f'<b>Verbesserungsbedarf:</b> {" | ".join(schwaechen)}', muted_style))
+
+            story.append(Spacer(1, 8))
+            story.append(HRFlowable(width='100%', thickness=0.3, color=colors.HexColor('#f3f4f6'), spaceAfter=8))
+
+        # Footer
+        story.append(Spacer(1, 20))
+        footer_style = ParagraphStyle('footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#9ca3af'))
+        story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#e5e7eb'), spaceAfter=6))
+        story.append(Paragraph('DaF Sprachdiagnostik – Automatisch generierter Bericht.', footer_style))
+
+        doc.build(story)
+        pdf_buffer.seek(0)
         return StreamingResponse(
-            io.BytesIO(pdf_bytes),
+            pdf_buffer,
             media_type="application/pdf",
             headers={"Content-Disposition": f"attachment; filename=einstufungsbericht_{token[:8]}.pdf"}
         )
     except Exception as e:
+        print(f"[PDF-Export fehlgeschlagen]: {e}")
         # Fallback: HTML zurückgeben
         return StreamingResponse(
             io.BytesIO(html.encode("utf-8")),
