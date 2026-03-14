@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Einstufungsbericht – DaF Sprachdiagnostik</title>
   <link rel="stylesheet" href="/static/css/main.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <nav class="navbar">
@@ -51,6 +52,20 @@
     <div class="card mb-6">
       <h3 class="mb-3">🔍 Gesamteinschätzung</h3>
       <p id="gesamteinschaetzung" class="text-muted">–</p>
+    </div>
+
+    <!-- Visualisierungen: Spinnennetz + Fortschrittsbalken -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem; margin-bottom:1.5rem;" id="viz-bereich" class="hidden">
+      <!-- Spinnennetz-Diagramm -->
+      <div class="card">
+        <h3 class="mb-3">🕸️ Kompetenzprofil</h3>
+        <canvas id="radar-chart" width="300" height="300"></canvas>
+      </div>
+      <!-- Fortschrittsbalken -->
+      <div class="card">
+        <h3 class="mb-3">📊 Einzelkompetenzen</h3>
+        <div id="balken-bereich" style="display:flex; flex-direction:column; gap:.75rem;"></div>
+      </div>
     </div>
 
     <!-- Modul-Ergebnisse -->
@@ -311,6 +326,93 @@ function zeigeBericht(data) {
   // Export-Links
   document.getElementById('btn-pdf').href = `/api/export/pdf/${token}`;
   document.getElementById('btn-json').href = `/api/ergebnis/${token}`;
+
+  // Visualisierungen aufbauen
+  zeigeVisualisierungen(module);
+}
+
+function zeigeVisualisierungen(module) {
+  if (!module || !module.length) return;
+
+  // Modul-Scores normalisieren (M4/M5 sind 0-10, andere 0-100)
+  const MODUL_NAMEN_KURZ = {
+    'm1_grammatik': 'Grammatik',
+    'm2_lesen': 'Lesen',
+    'm3_hoerverstehen': 'Hören',
+    'm4_vorlesen': 'Vorlesen',
+    'm5_sprechen': 'Sprechen',
+    'm6_schreiben': 'Schreiben',
+  };
+
+  const labels = [];
+  const scores = [];
+  const farben = [];
+
+  module.forEach(m => {
+    const name = MODUL_NAMEN_KURZ[m.modul] || m.modul;
+    let score = Math.round(m.score || 0);
+    // Normalisieren: Scores ≤15 sind wahrscheinlich 0-10 Skala
+    if (score <= 15) score = score * 10;
+    score = Math.min(100, score);
+    labels.push(name);
+    scores.push(score);
+    farben.push(score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444');
+  });
+
+  if (labels.length < 2) return;
+  document.getElementById('viz-bereich').classList.remove('hidden');
+
+  // Spinnennetz-Diagramm
+  const ctx = document.getElementById('radar-chart').getContext('2d');
+  new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Kompetenzprofil',
+        data: scores,
+        backgroundColor: 'rgba(37, 99, 235, 0.15)',
+        borderColor: 'rgba(37, 99, 235, 0.8)',
+        borderWidth: 2,
+        pointBackgroundColor: farben,
+        pointRadius: 5,
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        r: {
+          min: 0, max: 100,
+          ticks: { stepSize: 20, font: { size: 10 } },
+          pointLabels: { font: { size: 12, weight: 'bold' } },
+          grid: { color: 'rgba(0,0,0,0.08)' },
+        }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  // Fortschrittsbalken
+  const balkenEl = document.getElementById('balken-bereich');
+  labels.forEach((label, i) => {
+    const score = scores[i];
+    const farbe = score >= 70 ? 'var(--success)' : score >= 40 ? 'var(--warning)' : 'var(--danger)';
+    const cefr = module[i].cefr || '';
+    const div = document.createElement('div');
+    div.innerHTML = `
+      <div class="flex justify-between items-center mb-1">
+        <span class="text-sm font-bold">${label}</span>
+        <div class="flex items-center gap-2">
+          ${cefr ? `<span class="badge badge-gray" style="font-size:.7rem;">${cefr}</span>` : ''}
+          <span class="text-sm font-bold" style="color:${farbe};">${score}/100</span>
+        </div>
+      </div>
+      <div style="background:#f3f4f6; border-radius:999px; height:10px; overflow:hidden;">
+        <div style="height:100%; width:${score}%; background:${farbe}; border-radius:999px; transition:width 1s ease;"></div>
+      </div>
+    `;
+    balkenEl.appendChild(div);
+  });
 }
 
 ladeBericht();
