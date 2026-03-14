@@ -100,6 +100,18 @@
     </div>
     <button class="btn btn-primary btn-lg w-full" onclick="weiter()">Weiter zur Zahlung →</button>
     <p class="text-xs text-muted mt-3">🔒 Sichere Zahlung via Stripe · Keine Datenspeicherung</p>
+
+    <!-- Demo-Bypass -->
+    <div class="card mt-5" style="border: 2px dashed var(--warning, #f59e0b); background: #fffbeb;">
+      <div class="text-center">
+        <div style="font-size:1.5rem; margin-bottom:.4rem;">🧪</div>
+        <div class="font-bold mb-1" style="color:#92400e;">Demo-Modus (ohne Zahlung)</div>
+        <p class="text-sm text-muted mb-3">Teste alle Module kostenlos – kein Stripe-Konto erforderlich.</p>
+        <button class="btn btn-lg w-full" style="background:#f59e0b; color:#fff; border:none;" onclick="demoBypass()">
+          ▶ Jetzt kostenlos testen
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -160,6 +172,35 @@ function aktualisiereZusammenfassung() {
   document.getElementById('zusammenfassung-paket').textContent = `Paket ${p.name}`;
   document.getElementById('zusammenfassung-module').textContent = p.module;
   document.getElementById('zusammenfassung-preis').textContent = preis;
+}
+
+async function demoBypass() {
+  if (!gewaehltesPaket) return;
+  const waehrung = document.querySelector('input[name="waehrung"]:checked').value;
+  const btn = document.querySelector('[onclick="demoBypass()"]');
+  btn.disabled = true;
+  btn.textContent = 'Wird vorbereitet…';
+
+  try {
+    const fd = new FormData();
+    fd.append('paket', gewaehltesPaket);
+    fd.append('hilfssprache', gewaehlteSprache);
+    fd.append('waehrung', waehrung);
+
+    const res = await fetch('/api/zahlung/demo-bypass', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.redirect) {
+      window.location.href = data.redirect;
+    } else if (data.token) {
+      window.location.href = `/test/${data.token}`;
+    } else {
+      throw new Error(data.detail || 'Unbekannter Fehler');
+    }
+  } catch (e) {
+    alert('Fehler: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '▶ Jetzt kostenlos testen';
+  }
 }
 
 async function weiter() {
