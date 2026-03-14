@@ -190,56 +190,118 @@ function zeigeBericht(data) {
       const div = document.createElement('div');
       div.className = 'card mb-4';
       const modulScore = Math.round(modul.score || 0);
+      const analyse = modul.analyse || {};
+
+      // Analyse-Felder aus verschiedenen Backend-Strukturen extrahieren
+      const textAnalyse = analyse.text_analyse || analyse;
+      const audioAnalyse = analyse.audio_analyse || null;
+
+      const einschaetzung = textAnalyse.gesamteinschaetzung || analyse.gesamteinschaetzung || '';
+      const staerken = textAnalyse.staerken || analyse.staerken || [];
+      const schwaechen = textAnalyse.schwaechen || analyse.schwaechen || [];
+      const empfehlungen = textAnalyse.empfehlungen || analyse.empfehlungen || [];
+
+      // Skills aus Grammatik/Wortschatz/Satzbau etc. extrahieren
       let skillsHTML = '';
-      if (modul.skills && modul.skills.length) {
-        skillsHTML = `<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:.75rem; margin-top:1rem;">
-          ${modul.skills.map(s => `
-            <div style="background:var(--gray-50); border-radius:var(--radius); padding:.75rem;">
+      const skillKategorien = [
+        ['grammatik', textAnalyse.grammatik],
+        ['wortschatz', textAnalyse.wortschatz],
+        ['satzbau', textAnalyse.satzbau ? {satzbau: textAnalyse.satzbau} : null],
+        ['pragmatik', textAnalyse.pragmatik],
+        ['rechtschreibung', textAnalyse.rechtschreibung ? {rechtschreibung: textAnalyse.rechtschreibung} : null],
+        ['kohaerenz', textAnalyse.kohaerenz ? {kohaerenz: textAnalyse.kohaerenz} : null],
+        ['aufgabenerfullung', textAnalyse.aufgabenerfullung ? {aufgabenerfullung: textAnalyse.aufgabenerfullung} : null],
+      ].filter(([, v]) => v && typeof v === 'object');
+
+      const allSkills = [];
+      skillKategorien.forEach(([kat, obj]) => {
+        if (obj && typeof obj === 'object') {
+          if ('score' in obj) {
+            allSkills.push({ name: kat, score: obj.score, begruendung: obj.begruendung || '' });
+          } else {
+            Object.entries(obj).forEach(([k, v]) => {
+              if (v && typeof v === 'object' && 'score' in v) {
+                allSkills.push({ name: k, score: v.score, begruendung: v.begruendung || '' });
+              }
+            });
+          }
+        }
+      });
+
+      if (allSkills.length) {
+        skillsHTML = `<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:.6rem; margin-top:1rem;">
+          ${allSkills.map(s => `
+            <div style="background:var(--gray-50); border-radius:var(--radius); padding:.6rem;">
               <div class="flex justify-between mb-1">
-                <span class="text-xs font-bold">${s.name}</span>
-                <span class="text-xs font-bold" style="color:${s.score >= 7 ? 'var(--success)' : s.score >= 4 ? 'var(--warning)' : 'var(--danger)'};">${s.score}/10</span>
+                <span class="text-xs font-bold" style="text-transform:capitalize;">${s.name.replace(/_/g,' ')}</span>
+                <span class="text-xs font-bold" style="color:${s.score >= 7 ? 'var(--success)' : s.score >= 4 ? 'var(--warning)' : 'var(--danger)'}">${s.score}/10</span>
               </div>
-              <div class="score-bar" style="height:4px;">
-                <div class="score-bar-fill ${scoreKlasse(s.score * 10)}" style="width:${s.score * 10}%;"></div>
-              </div>
+              <div class="score-bar" style="height:4px;"><div class="score-bar-fill ${scoreKlasse(s.score * 10)}" style="width:${s.score * 10}%"></div></div>
               ${s.begruendung ? `<p class="text-xs text-muted mt-1">${s.begruendung}</p>` : ''}
             </div>
           `).join('')}
         </div>`;
       }
+
+      // Einzelfragen-Details (M1/M2/M3)
+      let detailsHTML = '';
+      if (analyse.details && analyse.details.length) {
+        detailsHTML = `
+          <details style="margin-top:1rem;">
+            <summary class="text-sm font-bold" style="cursor:pointer; color:var(--primary);">Einzelfragen-Auswertung anzeigen</summary>
+            <div style="margin-top:.75rem; display:flex; flex-direction:column; gap:.5rem;">
+              ${analyse.details.map(d => `
+                <div style="padding:.5rem .75rem; border-radius:6px; background:${d.ist_korrekt ? '#f0fdf4' : '#fef2f2'}; border-left:3px solid ${d.ist_korrekt ? 'var(--success)' : 'var(--danger)'}">
+                  <p class="text-xs font-bold mb-1">${d.frage}</p>
+                  <p class="text-xs text-muted">Deine Antwort: <b>${d.gewaehlt_text || d.gewaehlt}</b> ${d.ist_korrekt ? '✓' : `✗ (richtig: ${d.korrekt_text || d.korrekt})`}</p>
+                  ${d.erklaerung ? `<p class="text-xs text-muted mt-1">${d.erklaerung}</p>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </details>`;
+      }
+
+      // Audio-Analyse (M4/M5)
       let audioHTML = '';
-      if (modul.aussprache_analyse) {
-        const a = modul.aussprache_analyse;
-        audioHTML = `
-          <div style="background:var(--primary-lighter); border-radius:var(--radius); padding:1rem; margin-top:1rem; border-left:3px solid var(--primary-light);">
-            <div class="flex items-center gap-2 mb-2"><span>🎙️</span><strong class="text-sm">Aussprache-Analyse (Audio)</strong></div>
-            <p class="text-sm text-muted mb-2">${a.zusammenfassung || ''}</p>
-            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:.5rem;">
-              ${[['Verständlichkeit', a.verstaendlichkeit], ['Fluss', a.fluss], ['Akzent', a.akzent], ['Intonation', a.intonation]]
-                .filter(([,v]) => v !== undefined)
-                .map(([label, val]) => `
+      if (audioAnalyse) {
+        const av = audioAnalyse.verstaendlichkeit || audioAnalyse;
+        const audioFelder = [
+          ['Verständlichkeit', audioAnalyse.verstaendlichkeit?.score ?? audioAnalyse.verstaendlichkeit],
+          ['Fluss', audioAnalyse.fluss_fluency?.score ?? audioAnalyse.fluss],
+          ['Akzent', audioAnalyse.akzent?.score ?? audioAnalyse.akzent],
+          ['Intonation', audioAnalyse.intonation?.score ?? audioAnalyse.intonation],
+        ].filter(([, v]) => typeof v === 'number');
+        if (audioFelder.length) {
+          audioHTML = `
+            <div style="background:var(--primary-lighter); border-radius:var(--radius); padding:1rem; margin-top:1rem; border-left:3px solid var(--primary-light);">
+              <div class="flex items-center gap-2 mb-2"><span>🎙️</span><strong class="text-sm">Aussprache-Analyse</strong></div>
+              ${audioAnalyse.zusammenfassung ? `<p class="text-sm text-muted mb-2">${audioAnalyse.zusammenfassung}</p>` : ''}
+              <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:.5rem;">
+                ${audioFelder.map(([label, val]) => `
                   <div style="background:white; border-radius:6px; padding:.5rem; text-align:center;">
                     <div class="text-xs text-muted">${label}</div>
-                    <div class="font-bold" style="color:${val >= 7 ? 'var(--success)' : val >= 4 ? 'var(--warning)' : 'var(--danger)'};">${val}/10</div>
-                  </div>
-                `).join('')}
-            </div>
-            ${a.fehler && a.fehler.length ? `<p class="text-xs text-muted mt-2">Phonetische Auffälligkeiten: ${a.fehler.join(', ')}</p>` : ''}
-          </div>`;
+                    <div class="font-bold" style="color:${val >= 7 ? 'var(--success)' : val >= 4 ? 'var(--warning)' : 'var(--danger)'}">${val}/10</div>
+                  </div>`).join('')}
+              </div>
+            </div>`;
+        }
       }
+
       div.innerHTML = `
         <div class="flex justify-between items-center mb-3">
           <h3>${MODUL_NAMEN[modul.modul] || modul.modul}</h3>
           <div class="flex items-center gap-2">
-            <span class="badge badge-gray">${modul.cefr_niveau || ''}</span>
-            <span style="font-size:1.3rem; font-weight:800; color:${modulScore >= 70 ? 'var(--success)' : modulScore >= 40 ? 'var(--warning)' : 'var(--danger)'};">${modulScore}/100</span>
+            <span class="badge badge-gray">${modul.cefr || ''}</span>
+            <span style="font-size:1.3rem; font-weight:800; color:${modulScore >= 70 ? 'var(--success)' : modulScore >= 40 ? 'var(--warning)' : 'var(--danger)'}">${modulScore}/100</span>
           </div>
         </div>
-        <div class="score-bar mb-3">
-          <div class="score-bar-fill ${scoreKlasse(modulScore)}" style="width:${modulScore}%;"></div>
-        </div>
-        ${modul.zusammenfassung ? `<p class="text-sm text-muted">${modul.zusammenfassung}</p>` : ''}
+        <div class="score-bar mb-3"><div class="score-bar-fill ${scoreKlasse(modulScore)}" style="width:${modulScore}%"></div></div>
+        ${einschaetzung ? `<p class="text-sm text-muted mb-3">${einschaetzung}</p>` : ''}
+        ${staerken.length ? `<p class="text-sm mb-1"><span style="color:var(--success);">✓ Stärken:</span> ${staerken.join(' · ')}</p>` : ''}
+        ${schwaechen.length ? `<p class="text-sm mb-1"><span style="color:var(--warning);">→ Verbesserung:</span> ${schwaechen.join(' · ')}</p>` : ''}
+        ${empfehlungen.length ? `<p class="text-sm mb-3"><span style="color:var(--primary);">📌 Empfehlung:</span> ${empfehlungen.join(' · ')}</p>` : ''}
         ${skillsHTML}
+        ${detailsHTML}
         ${audioHTML}
       `;
       moduleEl.appendChild(div);
