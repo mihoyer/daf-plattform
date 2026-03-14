@@ -95,6 +95,35 @@ async def session_status(token: str, db: AsyncSession = Depends(get_db)):
     }
 
 
+# ── Demo-Bypass ─────────────────────────────────────────────────────────────
+
+@router.post("/api/zahlung/demo-bypass")
+async def demo_bypass(
+    token: str = Form(""),
+    paket: str = Form("basis"),
+    hilfssprache: str = Form("de"),
+    waehrung: str = Form("CHF"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Demo-Bypass: Aktiviert eine Session ohne Stripe-Zahlung (nur für Testzwecke)."""
+    if token:
+        sess = await session_service.lade_session(db, token)
+    else:
+        paket_enum = PaketTyp(paket) if paket in PaketTyp._value2member_map_ else PaketTyp.basis
+        hilfs_enum = Hilfssprache(hilfssprache) if hilfssprache in Hilfssprache._value2member_map_ else Hilfssprache.de
+        sess = await session_service.erstelle_session(db, paket_enum, hilfs_enum, waehrung)
+
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    sess.zahlungs_status = ZahlungsStatus.bezahlt
+    sess.status = SessionStatus.laufend
+    await db.commit()
+    await db.refresh(sess)
+
+    return {"token": sess.token, "paket": sess.paket.value, "redirect": f"/test/{sess.token}"}
+
+
 # ── Stripe ───────────────────────────────────────────────────────────────────
 
 @router.post("/api/zahlung/erstelle-intent")
