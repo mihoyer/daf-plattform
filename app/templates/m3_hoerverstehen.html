@@ -64,17 +64,28 @@ async function ladeAufgabe() {
   try {
     const res = await fetch(`/api/m3/${token}/aufgabe`);
     const data = await res.json();
-    const player = document.getElementById('audio-player');
-    player.src = data.audio_url;
     fragen = data.fragen;
-    player.addEventListener('ended', () => {
-      if (!audioGespielt) {
-        audioGespielt = true;
-        document.getElementById('hinweis-bereich').classList.add('hidden');
-        zeigeFragen();
-        document.getElementById('fragen-bereich').classList.remove('hidden');
-      }
-    });
+    const player = document.getElementById('audio-player');
+
+    if (data.audio_b64) {
+      // Backend liefert Base64-kodiertes MP3
+      player.src = `data:audio/mp3;base64,${data.audio_b64}`;
+      player.addEventListener('ended', () => {
+        if (!audioGespielt) {
+          audioGespielt = true;
+          document.getElementById('hinweis-bereich').classList.add('hidden');
+          zeigeFragen();
+          document.getElementById('fragen-bereich').classList.remove('hidden');
+        }
+      });
+    } else {
+      // Kein Audio verfügbar: Fragen sofort zeigen
+      document.getElementById('hinweis-bereich').innerHTML =
+        '<span class="alert-icon">⚠️</span><div class="text-sm">Kein Audio verfügbar. Bitte beantworte die Fragen direkt.</div>';
+      zeigeFragen();
+      document.getElementById('fragen-bereich').classList.remove('hidden');
+    }
+
     document.getElementById('lade-bereich').classList.add('hidden');
     document.getElementById('aufgabe-bereich').classList.remove('hidden');
   } catch (e) {
