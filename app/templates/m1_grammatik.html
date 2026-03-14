@@ -15,6 +15,7 @@
 </nav>
 
 <div class="container-sm" style="padding-top:2rem; padding-bottom:4rem;">
+
   <!-- Lade-Bereich -->
   <div id="lade-bereich" class="text-center" style="padding:4rem 0;">
     <div class="spinner" style="margin:0 auto 1rem;"></div>
@@ -23,30 +24,37 @@
 
   <!-- Aufgaben-Bereich -->
   <div id="aufgaben-bereich" class="hidden">
-    <div class="card mb-6" style="background:var(--primary-lighter);">
+    <!-- Header -->
+    <div class="card mb-4" style="background:var(--primary-lighter);">
       <div class="flex justify-between items-center flex-wrap gap-2">
         <div>
           <h2 class="mb-1">Grammatik &amp; Wortschatz</h2>
-          <p class="text-sm text-muted" id="aufgaben-info">–</p>
+          <p class="text-sm text-muted">Adaptiver Test · Fragen passen sich deinem Niveau an</p>
         </div>
         <div class="flex gap-2 items-center">
-          <span class="badge badge-gray" id="fortschritt-badge">0 / 0</span>
+          <span class="badge badge-gray" id="fortschritt-badge">1 / 10</span>
+          <span class="badge badge-primary" id="niveau-badge" style="display:none;">Niveau: –</span>
         </div>
+      </div>
+      <!-- Fortschrittsbalken -->
+      <div class="score-bar mt-3">
+        <div class="score-bar-fill high" id="fortschritt-balken" style="width:10%;"></div>
       </div>
     </div>
 
-    <!-- Fortschrittsbalken -->
-    <div class="score-bar mb-6">
-      <div class="score-bar-fill high" id="fortschritt-balken" style="width:0%;"></div>
+    <!-- Frage-Karte -->
+    <div id="frage-container"></div>
+
+    <!-- Feedback nach Antwort -->
+    <div id="feedback-bereich" class="hidden mt-4">
+      <div id="feedback-karte" class="card" style="border-left:4px solid #22c55e;">
+        <p id="feedback-text" class="mb-0"></p>
+      </div>
     </div>
 
-    <!-- Aufgabe -->
-    <div id="aufgabe-container"></div>
-
-    <!-- Navigation -->
-    <div class="flex justify-between mt-6">
-      <button class="btn btn-outline" id="btn-zurueck" onclick="vorherigeAufgabe()" disabled>← Zurück</button>
-      <button class="btn btn-primary" id="btn-weiter" onclick="naechsteAufgabe()" disabled>Weiter →</button>
+    <!-- Weiter-Button -->
+    <div class="flex justify-end mt-4">
+      <button class="btn btn-primary" id="btn-weiter" onclick="weiter()" disabled>Antwort wählen →</button>
     </div>
   </div>
 
@@ -62,43 +70,80 @@
 
 <script>
 const token = '{{ token }}';
-let aufgaben = [];
-let aktuelleIndex = 0;
-let antworten = {};
+const GESAMT_FRAGEN = 10;
 
-async function ladeAufgaben() {
+// Zustand
+let alleFragen = [];          // alle bisher gezeigten Fragen
+let antworten = {};           // {item_id: gewaehlter_index}
+let aktuelleFrageIdx = 0;    // Index in alleFragen (0-basiert)
+let gewaehltOption = null;    // aktuell gewählte Option
+let geschaetztesNiveau = 'B1';
+let phase = 'einstieg';       // 'einstieg' | 'adaptiv' | 'fertig'
+let wartendAufNaechste = false;
+
+// ── Start ──────────────────────────────────────────────────────────────────
+
+async function ladeEinstiegsfragen() {
   try {
     const res = await fetch(`/api/m1/${token}/items`);
-    if (!res.ok) throw new Error();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    aufgaben = data.items || data.aufgaben || [];
-    document.getElementById('aufgaben-info').textContent = `${aufgaben.length} Aufgaben · Niveau: ${data.niveau || 'adaptiv'}`;
+
+    alleFragen = data.items || [];
+    geschaetztesNiveau = data.geschaetztes_niveau || 'B1';
+
     document.getElementById('lade-bereich').classList.add('hidden');
     document.getElementById('aufgaben-bereich').classList.remove('hidden');
-    zeigeAufgabe(0);
+
+    zeigeAktuelleFrage();
   } catch (e) {
-    document.getElementById('lade-text').textContent = 'Fehler beim Laden der Aufgaben. Bitte Seite neu laden.';
+    document.getElementById('lade-text').textContent = 'Fehler beim Laden. Bitte Seite neu laden.';
+    console.error(e);
   }
 }
 
-function zeigeAufgabe(index) {
-  aktuelleIndex = index;
-  const aufgabe = aufgaben[index];
-  const total = aufgaben.length;
+// ── Frage anzeigen ─────────────────────────────────────────────────────────
 
-  document.getElementById('fortschritt-badge').textContent = `${index + 1} / ${total}`;
-  document.getElementById('fortschritt-balken').style.width = `${((index + 1) / total) * 100}%`;
-  document.getElementById('btn-zurueck').disabled = index === 0;
+function zeigeAktuelleFrage() {
+  const frage = alleFragen[aktuelleFrageIdx];
+  if (!frage) return;
 
-  const container = document.getElementById('aufgabe-container');
+  gewaehltOption = null;
+  document.getElementById('feedback-bereich').classList.add('hidden');
+  document.getElementById('btn-weiter').disabled = true;
+  document.getElementById('btn-weiter').textContent = 'Antwort wählen →';
+
+  // Fortschritt
+  const frageNr = aktuelleFrageIdx + 1;
+  document.getElementById('fortschritt-badge').textContent = `${frageNr} / ${GESAMT_FRAGEN}`;
+  document.getElementById('fortschritt-balken').style.width = `${(frageNr / GESAMT_FRAGEN) * 100}%`;
+
+  // Niveau-Badge ab Frage 4 anzeigen
+  const niveauBadge = document.getElementById('niveau-badge');
+  if (aktuelleFrageIdx >= 3) {
+    niveauBadge.style.display = '';
+    niveauBadge.textContent = `Niveau: ${geschaetztesNiveau}`;
+  }
+
+  // Frage-Karte rendern
+  const container = document.getElementById('frage-container');
+  const bereitsBeantwortet = antworten[frage.id] !== undefined;
+  const gewaehlt = antworten[frage.id] ?? null;
+
   container.innerHTML = `
     <div class="card">
-      <div class="text-xs text-muted mb-2">Aufgabe ${index + 1} von ${total} · ${aufgabe.kategorie || ''}</div>
-      <h3 class="mb-4">${aufgabe.frage}</h3>
+      <div class="text-xs text-muted mb-3" style="display:flex; gap:.5rem; align-items:center;">
+        <span>Frage ${frageNr}</span>
+        ${frage.thema ? `<span style="background:var(--primary-lighter); padding:2px 8px; border-radius:12px;">${frage.thema}</span>` : ''}
+      </div>
+      <h3 class="mb-5" style="font-size:1.15rem; line-height:1.6;">${frage.frage}</h3>
       <div id="optionen-liste">
-        ${aufgabe.optionen.map((opt, i) => `
-          <label class="mc-option ${antworten[index] === i ? 'selected' : ''}" onclick="waehleAntwort(${index}, ${i})">
-            <input type="radio" name="antwort_${index}" value="${i}" ${antworten[index] === i ? 'checked' : ''}>
+        ${frage.optionen.map((opt, i) => `
+          <label class="mc-option ${bereitsBeantwortet && gewaehlt === i ? 'selected' : ''}"
+                 onclick="${bereitsBeantwortet ? '' : `waehleAntwort(${i})`}"
+                 style="${bereitsBeantwortet ? 'cursor:default;' : ''}">
+            <input type="radio" name="antwort" value="${i}" ${bereitsBeantwortet && gewaehlt === i ? 'checked' : ''} ${bereitsBeantwortet ? 'disabled' : ''}>
+            <span class="option-buchstabe">${['A','B','C','D'][i]}</span>
             ${opt}
           </label>
         `).join('')}
@@ -106,37 +151,117 @@ function zeigeAufgabe(index) {
     </div>
   `;
 
-  const istLetzte = index === total - 1;
-  const hatAntwort = antworten[index] !== undefined;
-  document.getElementById('btn-weiter').disabled = !hatAntwort;
-  document.getElementById('btn-weiter').textContent = istLetzte ? 'Auswertung starten →' : 'Weiter →';
-}
-
-function waehleAntwort(aufgabeIndex, optionIndex) {
-  antworten[aufgabeIndex] = optionIndex;
-  document.querySelectorAll('.mc-option').forEach((el, i) => {
-    el.classList.toggle('selected', i === optionIndex);
-  });
-  document.getElementById('btn-weiter').disabled = false;
-}
-
-function naechsteAufgabe() {
-  if (aktuelleIndex < aufgaben.length - 1) {
-    zeigeAufgabe(aktuelleIndex + 1);
-  } else {
-    sendeAntworten();
+  // Wenn bereits beantwortet: Feedback sofort zeigen
+  if (bereitsBeantwortet) {
+    const istKorrekt = gewaehlt === frage.korrekt;
+    zeigeFeedback(istKorrekt, frage.erklaerung, frage.optionen[frage.korrekt]);
+    document.getElementById('btn-weiter').disabled = false;
+    document.getElementById('btn-weiter').textContent =
+      aktuelleFrageIdx < GESAMT_FRAGEN - 1 ? 'Weiter →' : 'Auswertung starten →';
   }
 }
 
-function vorherigeAufgabe() {
-  if (aktuelleIndex > 0) zeigeAufgabe(aktuelleIndex - 1);
+// ── Antwort wählen ─────────────────────────────────────────────────────────
+
+async function waehleAntwort(optionIdx) {
+  if (gewaehltOption !== null || wartendAufNaechste) return;
+  gewaehltOption = optionIdx;
+
+  const frage = alleFragen[aktuelleFrageIdx];
+  antworten[frage.id] = optionIdx;
+
+  // Gewählte Option markieren
+  document.querySelectorAll('.mc-option').forEach((el, i) => {
+    el.classList.toggle('selected', i === optionIdx);
+    el.style.cursor = 'default';
+    el.onclick = null;
+  });
+
+  const istKorrekt = optionIdx === frage.korrekt;
+
+  // Wenn noch nicht letzte Frage: nächste Frage vom Server holen (adaptiv)
+  const istLetzte = aktuelleFrageIdx >= GESAMT_FRAGEN - 1;
+  const istEinstiegsphase = aktuelleFrageIdx < alleFragen.length - 1;
+
+  if (!istLetzte && !istEinstiegsphase) {
+    // Adaptive Phase: nächste Frage vom Server anfordern
+    wartendAufNaechste = true;
+    document.getElementById('btn-weiter').textContent = 'Nächste Frage wird generiert…';
+    document.getElementById('btn-weiter').disabled = true;
+
+    try {
+      const res = await fetch(`/api/m1/${token}/naechste`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: frage.id, gewaehlt: optionIdx }),
+      });
+      const data = await res.json();
+      alleFragen.push(data.frage);
+      geschaetztesNiveau = data.geschaetztes_niveau || geschaetztesNiveau;
+    } catch (e) {
+      console.error('Fehler beim Laden der nächsten Frage:', e);
+    }
+    wartendAufNaechste = false;
+  }
+
+  zeigeFeedback(istKorrekt, frage.erklaerung, frage.optionen[frage.korrekt]);
+
+  document.getElementById('btn-weiter').disabled = false;
+  document.getElementById('btn-weiter').textContent =
+    istLetzte ? 'Auswertung starten →' : 'Weiter →';
 }
 
-async function sendeAntworten() {
+// ── Feedback ───────────────────────────────────────────────────────────────
+
+function zeigeFeedback(istKorrekt, erklaerung, korrektText) {
+  const bereich = document.getElementById('feedback-bereich');
+  const karte = document.getElementById('feedback-karte');
+  const text = document.getElementById('feedback-text');
+
+  karte.style.borderLeftColor = istKorrekt ? '#22c55e' : '#ef4444';
+  text.innerHTML = istKorrekt
+    ? `<strong style="color:#22c55e;">✓ Richtig!</strong> ${erklaerung || ''}`
+    : `<strong style="color:#ef4444;">✗ Leider falsch.</strong> Die richtige Antwort ist: <strong>${korrektText}</strong>. ${erklaerung || ''}`;
+
+  bereich.classList.remove('hidden');
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+
+async function weiter() {
+  if (aktuelleFrageIdx >= GESAMT_FRAGEN - 1) {
+    await sendeEndauswertung();
+    return;
+  }
+
+  aktuelleFrageIdx++;
+
+  // Falls wir in der Einstiegsphase noch vorhandene Fragen haben
+  if (aktuelleFrageIdx < alleFragen.length) {
+    zeigeAktuelleFrage();
+  } else {
+    // Sollte nicht passieren (nächste Frage wurde bereits geladen)
+    document.getElementById('btn-weiter').disabled = true;
+    document.getElementById('btn-weiter').textContent = 'Wird geladen…';
+    // Kurz warten und neu prüfen
+    setTimeout(() => {
+      if (aktuelleFrageIdx < alleFragen.length) zeigeAktuelleFrage();
+    }, 500);
+  }
+}
+
+// ── Endauswertung ──────────────────────────────────────────────────────────
+
+async function sendeEndauswertung() {
   document.getElementById('analyse-overlay').classList.remove('hidden');
-  // Backend erwartet: { antworten: {"1": 2, "2": 0, ...} } (item.id als String → gewählter Index)
+
+  // Antworten als {item_id_string: option_index}
   const antwortenPayload = {};
-  aufgaben.forEach((a, i) => { antwortenPayload[String(a.id)] = antworten[i] ?? -1; });
+  alleFragen.forEach(f => {
+    if (antworten[f.id] !== undefined) {
+      antwortenPayload[String(f.id)] = antworten[f.id];
+    }
+  });
 
   try {
     const res = await fetch(`/api/m1/${token}/submit`, {
@@ -144,11 +269,14 @@ async function sendeAntworten() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ antworten: antwortenPayload }),
     });
-    const data = await res.json();
-    window.location.href = await naechstesModul() || `/ergebnis/${token}`;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const naechste = await naechstesModul();
+    window.location.href = naechste || `/ergebnis/${token}`;
   } catch (e) {
     document.getElementById('analyse-overlay').classList.add('hidden');
     alert('Fehler bei der Auswertung. Bitte versuche es erneut.');
+    console.error(e);
   }
 }
 
@@ -162,7 +290,8 @@ async function naechstesModul() {
   return null;
 }
 
-ladeAufgaben();
+// ── Init ───────────────────────────────────────────────────────────────────
+ladeEinstiegsfragen();
 </script>
 </body>
 </html>
