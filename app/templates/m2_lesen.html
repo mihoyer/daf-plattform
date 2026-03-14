@@ -94,9 +94,9 @@ function waehleAntwort(frageIndex, optionIndex) {
 
 async function auswerten() {
   document.getElementById('analyse-overlay').classList.remove('hidden');
-  // Backend erwartet: { antworten: {"0": 2, "1": 0, ...} } (Index als String → gewählter Index)
+  // Backend erwartet: { antworten: {"1": 2, "2": 0, ...} } (frage.id als String → gewählter Index)
   const antwortenPayload = {};
-  fragen.forEach((f, i) => { antwortenPayload[String(i)] = antworten[i] ?? -1; });
+  fragen.forEach((f, i) => { antwortenPayload[String(f.id ?? i + 1)] = antworten[i] ?? -1; });
   try {
     const res = await fetch(`/api/m2/${token}/submit`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

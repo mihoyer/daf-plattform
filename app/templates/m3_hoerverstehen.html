@@ -123,7 +123,8 @@ function waehleAntwort(frageIndex, optionIndex) {
 async function auswerten() {
   document.getElementById('analyse-overlay').classList.remove('hidden');
   const antwortenPayload = {};
-  fragen.forEach((f, i) => { antwortenPayload[String(i)] = antworten[i] ?? -1; });
+  // Backend erwartet frage.id als Key (wie M1/M2)
+  fragen.forEach((f, i) => { antwortenPayload[String(f.id ?? i + 1)] = antworten[i] ?? -1; });
   try {
     const res = await fetch(`/api/m3/${token}/submit`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
