@@ -27,12 +27,12 @@ async def transkribiere_audio(audio_pfad: str, sprache: str = "de") -> dict:
             model="gpt-4o-transcribe",
             file=f,
             language=sprache,
-            response_format="verbose_json",
+            response_format="json",
         )
     return {
         "text": result.text,
         "sprache": getattr(result, "language", sprache),
-        "dauer": getattr(result, "duration", None),
+        "dauer": None,
     }
 
 
