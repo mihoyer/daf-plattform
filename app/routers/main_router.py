@@ -681,3 +681,87 @@ async def ergebnis(token: str, db: AsyncSession = Depends(get_db)):
         "module": module_data,
         "abgeschlossen_am": sess.abgeschlossen_am.isoformat() if sess.abgeschlossen_am else None,
     }
+
+
+# ── PDF-Export ────────────────────────────────────────────────────────────────
+
+@router.get("/api/export/pdf/{token}")
+async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
+    """Exportiert den Einstufungsbericht als PDF."""
+    from fastapi.responses import StreamingResponse
+    import io
+
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    # HTML für PDF aufbauen
+    module_html = ""
+    for m in sorted(sess.module, key=lambda x: x.reihenfolge):
+        score = round(m.gesamt_score or 0)
+        cefr = m.cefr_niveau.value if m.cefr_niveau else "–"
+        analyse = m.get_ki_analyse() or {}
+        zusammenfassung = analyse.get("zusammenfassung", analyse.get("feedback", ""))
+        module_html += f"""
+        <div style="margin-bottom:1.5rem; padding:1rem; border:1px solid #e5e7eb; border-radius:8px;">
+          <h3 style="margin:0 0 .5rem;">{m.modul.value.replace('_', ' ').title()}</h3>
+          <p style="margin:.25rem 0; color:#6b7280;">Score: {score}/100 &nbsp;|&nbsp; CEFR: {cefr}</p>
+          {f'<p style="margin:.5rem 0; font-size:.9rem;">{zusammenfassung}</p>' if zusammenfassung else ''}
+        </div>"""
+
+    gesamt_score = round(sess.gesamt_score or 0)
+    gesamt_niveau = sess.gesamt_niveau.value if sess.gesamt_niveau else "–"
+    datum = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+
+    html = f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Einstufungsbericht – DaF Sprachdiagnostik</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; color: #1f2937; }}
+    h1 {{ color: #1e3a5f; }} h2 {{ color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom:.5rem; }}
+    .score-box {{ display:inline-block; background:#f0f4ff; border-radius:8px; padding:1rem 2rem; margin:.5rem; text-align:center; }}
+    .score-big {{ font-size:2.5rem; font-weight:800; color:#2563eb; }}
+    footer {{ margin-top:3rem; font-size:.8rem; color:#9ca3af; border-top:1px solid #e5e7eb; padding-top:1rem; }}
+  </style>
+</head>
+<body>
+  <h1>Einstufungsbericht – DaF Sprachdiagnostik</h1>
+  <p style="color:#6b7280;">Erstellt am {datum} &nbsp;|&nbsp; Session: {token[:8]}…</p>
+  <div style="margin:1.5rem 0;">
+    <div class="score-box"><div class="score-big">{gesamt_score}</div><div>Gesamtscore</div></div>
+    <div class="score-box"><div class="score-big">{gesamt_niveau}</div><div>CEFR-Niveau</div></div>
+  </div>
+  <h2>Modul-Ergebnisse</h2>
+  {module_html if module_html else '<p style="color:#6b7280;">Keine abgeschlossenen Module.</p>'}
+  <footer>DaF Sprachdiagnostik – Automatisch generierter Bericht. Alle Daten werden nach dem Export gelöscht.</footer>
+</body>
+</html>"""
+
+    try:
+        import subprocess
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+            f.write(html)
+            html_pfad = f.name
+        pdf_pfad = html_pfad.replace(".html", ".pdf")
+        subprocess.run(
+            ["weasyprint", html_pfad, pdf_pfad],
+            capture_output=True, timeout=30, check=True
+        )
+        with open(pdf_pfad, "rb") as f:
+            pdf_bytes = f.read()
+        os.unlink(html_pfad)
+        os.unlink(pdf_pfad)
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=einstufungsbericht_{token[:8]}.pdf"}
+        )
+    except Exception as e:
+        # Fallback: HTML zurückgeben
+        return StreamingResponse(
+            io.BytesIO(html.encode("utf-8")),
+            media_type="text/html",
+            headers={"Content-Disposition": f"attachment; filename=einstufungsbericht_{token[:8]}.html"}
+        )
