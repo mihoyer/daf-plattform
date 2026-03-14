@@ -66,7 +66,7 @@ const MODUL_INFO = {
 
 async function ladeSession() {
   try {
-    const res = await fetch(`/api/session/${token}`);
+    const res = await fetch(`/api/session/${token}/status`);
     if (!res.ok) throw new Error('Session nicht gefunden');
     sessionData = await res.json();
     zeigeSession();
