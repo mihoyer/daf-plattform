@@ -382,7 +382,6 @@ async def analysiere_hoerverstehen(
         fragen=fragen,
         antworten=antworten,
         niveau=niveau,
-    )au=niveau,
     )
 
 
