@@ -132,27 +132,61 @@ function zeigeBericht(data) {
     <span class="badge badge-gray">Session ${token.substring(0,8)}…</span>
   `;
 
-  // Gesamtscore
-  const score = Math.round(data.gesamtscore || 0);
+  // Gesamtscore – Backend liefert 'gesamt_score'
+  const score = Math.round(data.gesamt_score || data.gesamtscore || 0);
   document.getElementById('gesamtscore').textContent = score;
   const bar = document.getElementById('gesamtscore-bar');
   bar.style.width = score + '%';
   bar.className = `score-bar-fill ${scoreKlasse(score)}`;
 
-  // CEFR
-  const cefr = data.cefr_niveau || '–';
+  // CEFR – Backend liefert 'gesamt_niveau'
+  const cefr = data.gesamt_niveau || data.cefr_niveau || '–';
   const cefrEl = document.getElementById('cefr-level');
   cefrEl.textContent = cefr;
   cefrEl.style.color = CEFR_FARBEN[cefr] || 'var(--gray-700)';
-  document.getElementById('cefr-beschreibung').textContent = data.cefr_beschreibung || '';
+  document.getElementById('cefr-beschreibung').textContent = '';
 
-  // Gesamteinschätzung
-  document.getElementById('gesamteinschaetzung').textContent = data.gesamteinschaetzung || '–';
+  // Gesamteinschätzung aus Modul-Analysen zusammenbauen
+  const module = data.module || data.module_ergebnisse || [];
+  const abgeschlossene = module.filter(m => m.status === 'abgeschlossen');
+  const einschaetzung = abgeschlossene.length
+    ? `${abgeschlossene.length} von ${module.length} Modulen abgeschlossen. Gesamtniveau: ${cefr}.`
+    : 'Die Analyse wird nach Abschluss aller Module berechnet.';
+  document.getElementById('gesamteinschaetzung').textContent = einschaetzung;
 
-  // Module
+  // Stärken & Schwächen aus Modul-Analysen ableiten
+  const staerkenEl = document.getElementById('staerken-liste');
+  const schwaechenEl = document.getElementById('schwaechen-liste');
+  abgeschlossene.forEach(m => {
+    const analyse = m.analyse || {};
+    const modulName = MODUL_NAMEN[m.modul] || m.modul;
+    const modulScore = m.score || 0;
+    const li = document.createElement('li');
+    li.className = 'text-sm';
+    if (modulScore >= 60) {
+      li.innerHTML = `<span style="color:var(--success); margin-right:.4rem;">✓</span>${modulName}: ${Math.round(modulScore)}/100`;
+      staerkenEl.appendChild(li);
+    } else {
+      li.innerHTML = `<span style="color:var(--warning); margin-right:.4rem;">→</span>${modulName}: ${Math.round(modulScore)}/100`;
+      schwaechenEl.appendChild(li);
+    }
+  });
+  if (!staerkenEl.children.length) staerkenEl.innerHTML = '<li class="text-sm text-muted">–</li>';
+  if (!schwaechenEl.children.length) schwaechenEl.innerHTML = '<li class="text-sm text-muted">–</li>';
+
+  // Empfehlungen
+  const empfEl = document.getElementById('empfehlungen-liste');
+  if (cefr && cefr !== '–') {
+    const div = document.createElement('div');
+    div.className = 'flex gap-2 items-start';
+    div.innerHTML = `<span style="color:var(--primary); flex-shrink:0;">📌</span><p class="text-sm">Basierend auf deinem Niveau ${cefr} empfehlen wir gezieltes Üben der schwächeren Bereiche.</p>`;
+    empfEl.appendChild(div);
+  }
+
+  // Module – Backend liefert 'module' (nicht 'module_ergebnisse')
   const moduleEl = document.getElementById('module-bereich');
-  if (data.module_ergebnisse && data.module_ergebnisse.length) {
-    data.module_ergebnisse.forEach(modul => {
+  if (module.length) {
+    module.forEach(modul => {
       const div = document.createElement('div');
       div.className = 'card mb-4';
       const modulScore = Math.round(modul.score || 0);
@@ -212,36 +246,9 @@ function zeigeBericht(data) {
     });
   }
 
-  // Stärken
-  const staerkenEl = document.getElementById('staerken-liste');
-  (data.staerken || []).forEach(s => {
-    const li = document.createElement('li');
-    li.className = 'text-sm';
-    li.innerHTML = `<span style="color:var(--success); margin-right:.4rem;">✓</span>${s}`;
-    staerkenEl.appendChild(li);
-  });
-
-  // Schwächen
-  const schwaechenEl = document.getElementById('schwaechen-liste');
-  (data.schwaechen || []).forEach(s => {
-    const li = document.createElement('li');
-    li.className = 'text-sm';
-    li.innerHTML = `<span style="color:var(--warning); margin-right:.4rem;">→</span>${s}`;
-    schwaechenEl.appendChild(li);
-  });
-
-  // Empfehlungen
-  const empfEl = document.getElementById('empfehlungen-liste');
-  (data.empfehlungen || []).forEach(e => {
-    const div = document.createElement('div');
-    div.className = 'flex gap-2 items-start';
-    div.innerHTML = `<span style="color:var(--primary); flex-shrink:0;">📌</span><p class="text-sm">${e}</p>`;
-    empfEl.appendChild(div);
-  });
-
   // Export-Links
-  document.getElementById('btn-pdf').href = `/export/pdf/${token}`;
-  document.getElementById('btn-json').href = `/export/json/${token}`;
+  document.getElementById('btn-pdf').href = `/api/export/pdf/${token}`;
+  document.getElementById('btn-json').href = `/api/ergebnis/${token}`;
 }
 
 ladeBericht();
