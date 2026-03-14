@@ -68,10 +68,10 @@ let antworten = {};
 
 async function ladeAufgaben() {
   try {
-    const res = await fetch(`/api/m1/aufgaben/${token}`);
+    const res = await fetch(`/api/m1/${token}/items`);
     if (!res.ok) throw new Error();
     const data = await res.json();
-    aufgaben = data.aufgaben;
+    aufgaben = data.items || data.aufgaben || [];
     document.getElementById('aufgaben-info').textContent = `${aufgaben.length} Aufgaben · Niveau: ${data.niveau || 'adaptiv'}`;
     document.getElementById('lade-bereich').classList.add('hidden');
     document.getElementById('aufgaben-bereich').classList.remove('hidden');
@@ -134,23 +134,32 @@ function vorherigeAufgabe() {
 
 async function sendeAntworten() {
   document.getElementById('analyse-overlay').classList.remove('hidden');
-  const payload = aufgaben.map((a, i) => ({
-    aufgabe_id: a.id,
-    antwort_index: antworten[i] ?? -1,
-  }));
+  // Backend erwartet: { antworten: {"1": 2, "2": 0, ...} } (item.id als String → gewählter Index)
+  const antwortenPayload = {};
+  aufgaben.forEach((a, i) => { antwortenPayload[String(a.id)] = antworten[i] ?? -1; });
 
   try {
-    const res = await fetch(`/api/m1/auswerten/${token}`, {
+    const res = await fetch(`/api/m1/${token}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ antworten: payload }),
+      body: JSON.stringify({ antworten: antwortenPayload }),
     });
     const data = await res.json();
-    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+    window.location.href = await naechstesModul() || `/ergebnis/${token}`;
   } catch (e) {
     document.getElementById('analyse-overlay').classList.add('hidden');
     alert('Fehler bei der Auswertung. Bitte versuche es erneut.');
   }
+}
+
+async function naechstesModul() {
+  try {
+    const r = await fetch(`/api/session/${token}/status`);
+    const s = await r.json();
+    const naechstes = s.module.find(m => m.status === 'ausstehend');
+    if (naechstes) return `/${naechstes.modul.split('_')[0]}/${token}`;
+  } catch(e) {}
+  return null;
 }
 
 ladeAufgaben();

@@ -74,10 +74,12 @@ let aufgabeId = null;
 
 async function ladeAufgabe() {
   try {
-    const res = await fetch(`/api/m4/aufgabe/${token}`);
+    const res = await fetch(`/api/m4/${token}/text`);
     const data = await res.json();
-    aufgabeId = data.aufgabe_id;
-    document.getElementById('vorlesetext').textContent = data.text;
+    aufgabeId = data.niveau || 'B1';
+    // Saetze zusammenfügen oder ersten Satz anzeigen
+    const saetze = data.saetze || [];
+    document.getElementById('vorlesetext').textContent = saetze.join(' ');  
     document.getElementById('lade-bereich').classList.add('hidden');
     document.getElementById('aufgabe-bereich').classList.remove('hidden');
   } catch (e) {
@@ -138,13 +140,26 @@ async function sendeAudio() {
   formData.append('audio', audioBlob, 'vorlesen.webm');
   formData.append('aufgabe_id', aufgabeId || '');
   try {
-    const res = await fetch(`/api/m4/analysieren/${token}`, { method: 'POST', body: formData });
-    const data = await res.json();
-    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+    // Erst hochladen, dann analysieren
+    const uploadRes = await fetch(`/api/m4/${token}/upload`, { method: 'POST', body: formData });
+    if (!uploadRes.ok) throw new Error('Upload fehlgeschlagen');
+    const analyseRes = await fetch(`/api/m4/${token}/analysiere`, { method: 'POST' });
+    if (!analyseRes.ok) throw new Error('Analyse fehlgeschlagen');
+    window.location.href = await naechstesModul() || `/ergebnis/${token}`;
   } catch (e) {
     document.getElementById('analyse-overlay').classList.add('hidden');
     alert('Analysefehler. Bitte versuche es erneut.');
   }
+}
+
+async function naechstesModul() {
+  try {
+    const r = await fetch(`/api/session/${token}/status`);
+    const s = await r.json();
+    const naechstes = s.module.find(m => m.status === 'ausstehend');
+    if (naechstes) return `/${naechstes.modul.split('_')[0]}/${token}`;
+  } catch(e) {}
+  return null;
 }
 
 ladeAufgabe();

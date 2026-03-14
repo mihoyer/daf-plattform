@@ -99,12 +99,13 @@ let aufgabeId = null;
 
 async function ladeAufgabe() {
   try {
-    const res = await fetch(`/api/m6/aufgabe/${token}`);
+    const res = await fetch(`/api/m6/${token}/aufgabe`);
     const data = await res.json();
-    aufgabeId = data.aufgabe_id;
-    document.getElementById('aufgabe-anweisung').textContent = data.anweisung || 'Schreibe einen Text zur folgenden Aufgabe.';
-    document.getElementById('aufgabe-titel').textContent = data.titel || 'Schreibaufgabe';
-    document.getElementById('aufgabe-beschreibung').textContent = data.beschreibung || '';
+    aufgabeId = data.niveau || 'B1';
+    // Backend gibt { aufgabe: "...", niveau: "B1" } zurück
+    document.getElementById('aufgabe-anweisung').textContent = data.aufgabe || 'Schreibe einen Text.';
+    document.getElementById('aufgabe-titel').textContent = 'Schreibaufgabe';
+    document.getElementById('aufgabe-beschreibung').textContent = `Niveau: ${data.niveau || 'B1'}`;  
     document.getElementById('lade-bereich').classList.add('hidden');
     document.getElementById('aufgabe-bereich').classList.remove('hidden');
   } catch (e) {
@@ -170,17 +171,28 @@ async function sendeEingabe() {
       alert('Bitte lade ein Foto deines Textes hoch.');
       return;
     }
-    formData.append('foto', fotoFile, 'handschrift.jpg');
+    // Backend erwartet 'bild' als Feldname, nicht 'foto'
+    formData.append('bild', fotoFile, 'handschrift.jpg');
   }
 
   try {
-    const res = await fetch(`/api/m6/analysieren/${token}`, { method: 'POST', body: formData });
-    const data = await res.json();
-    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+    const res = await fetch(`/api/m6/${token}/submit`, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Fehler');
+    window.location.href = await naechstesModul() || `/ergebnis/${token}`;
   } catch (e) {
     document.getElementById('analyse-overlay').classList.add('hidden');
     alert('Analysefehler. Bitte versuche es erneut.');
   }
+}
+
+async function naechstesModul() {
+  try {
+    const r = await fetch(`/api/session/${token}/status`);
+    const s = await r.json();
+    const naechstes = s.module.find(m => m.status === 'ausstehend');
+    if (naechstes) return `/${naechstes.modul.split('_')[0]}/${token}`;
+  } catch(e) {}
+  return null;
 }
 
 // Drag & Drop

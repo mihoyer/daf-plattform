@@ -106,12 +106,12 @@ let aufgabeId = null;
 
 async function ladeAufgabe() {
   try {
-    const res = await fetch(`/api/m5/aufgabe/${token}`);
+    const res = await fetch(`/api/m5/${token}/thema`);
     if (!res.ok) throw new Error();
     const data = await res.json();
-    aufgabeId = data.aufgabe_id;
+    aufgabeId = data.niveau || 'B1';
     document.getElementById('aufgabe-titel').textContent = data.thema;
-    document.getElementById('aufgabe-text').textContent = data.anweisung;
+    document.getElementById('aufgabe-text').textContent = data.thema;
     document.getElementById('lade-bereich').classList.add('hidden');
     document.getElementById('aufgabe-bereich').classList.remove('hidden');
   } catch (e) {
@@ -208,10 +208,12 @@ async function sendeAudio() {
   formData.append('aufgabe_id', aufgabeId || '');
 
   try {
-    const res = await fetch(`/api/m5/analysieren/${token}`, { method: 'POST', body: formData });
-    if (!res.ok) throw new Error((await res.json()).detail || 'Fehler');
-    const data = await res.json();
-    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+    // Erst hochladen, dann analysieren
+    const uploadRes = await fetch(`/api/m5/${token}/upload`, { method: 'POST', body: formData });
+    if (!uploadRes.ok) throw new Error((await uploadRes.json()).detail || 'Upload fehlgeschlagen');
+    const analyseRes = await fetch(`/api/m5/${token}/analysiere`, { method: 'POST' });
+    if (!analyseRes.ok) throw new Error((await analyseRes.json()).detail || 'Analyse fehlgeschlagen');
+    window.location.href = await naechstesModul() || `/ergebnis/${token}`;
   } catch (e) {
     document.getElementById('analyse-overlay').classList.add('hidden');
     alert(`Analysefehler: ${e.message}`);
@@ -226,6 +228,16 @@ function simuliereProgress() {
     bar.style.width = p + '%';
     if (p >= 90) clearInterval(iv);
   }, 800);
+}
+
+async function naechstesModul() {
+  try {
+    const r = await fetch(`/api/session/${token}/status`);
+    const s = await r.json();
+    const naechstes = s.module.find(m => m.status === 'ausstehend');
+    if (naechstes) return `/${naechstes.modul.split('_')[0]}/${token}`;
+  } catch(e) {}
+  return null;
 }
 
 ladeAufgabe();

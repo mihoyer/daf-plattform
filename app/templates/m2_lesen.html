@@ -55,7 +55,7 @@ let antworten = {};
 
 async function ladeAufgabe() {
   try {
-    const res = await fetch(`/api/m2/aufgabe/${token}`);
+    const res = await fetch(`/api/m2/${token}/aufgabe`);
     const data = await res.json();
     document.getElementById('text-titel').textContent = data.titel || 'Lesetext';
     document.getElementById('lesetext').innerHTML = data.text.replace(/\n/g, '<br>');
@@ -94,18 +94,30 @@ function waehleAntwort(frageIndex, optionIndex) {
 
 async function auswerten() {
   document.getElementById('analyse-overlay').classList.remove('hidden');
-  const payload = fragen.map((f, i) => ({ aufgabe_id: f.id, antwort_index: antworten[i] ?? -1 }));
+  // Backend erwartet: { antworten: {"0": 2, "1": 0, ...} } (Index als String → gewählter Index)
+  const antwortenPayload = {};
+  fragen.forEach((f, i) => { antwortenPayload[String(i)] = antworten[i] ?? -1; });
   try {
-    const res = await fetch(`/api/m2/auswerten/${token}`, {
+    const res = await fetch(`/api/m2/${token}/submit`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ antworten: payload }),
+      body: JSON.stringify({ antworten: antwortenPayload }),
     });
     const data = await res.json();
-    window.location.href = data.naechste_url || `/ergebnis/${token}`;
+    window.location.href = await naechstesModul() || `/ergebnis/${token}`;
   } catch (e) {
     document.getElementById('analyse-overlay').classList.add('hidden');
     alert('Fehler bei der Auswertung.');
   }
+}
+
+async function naechstesModul() {
+  try {
+    const r = await fetch(`/api/session/${token}/status`);
+    const s = await r.json();
+    const naechstes = s.module.find(m => m.status === 'ausstehend');
+    if (naechstes) return `/${naechstes.modul.split('_')[0]}/${token}`;
+  } catch(e) {}
+  return null;
 }
 
 ladeAufgabe();
