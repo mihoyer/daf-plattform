@@ -119,7 +119,9 @@ function zeigeSession() {
 function starteTest() {
   if (!sessionData || !sessionData.module.length) return;
   const erstesModul = sessionData.module[0].modul;
-  window.location.href = `/${erstesModul.replace('_', '/')}/${token}`;
+  // m1_grammatik → m1, m2_lesen → m2, etc.
+  const modulPfad = erstesModul.split('_')[0];
+  window.location.href = `/${modulPfad}/${token}`;
 }
 
 ladeSession();
