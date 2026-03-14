@@ -3,6 +3,7 @@ M1-Service: Grammatik & Wortschatz (Multiple Choice).
 Generiert niveau-adaptive Items via GPT-4.1 und wertet sie aus.
 """
 import json
+import random
 import re
 from typing import Optional
 
@@ -74,7 +75,7 @@ korrekt ist der 0-basierte Index der richtigen Antwort."""
             model="gpt-4.1",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            temperature=0.7,
+            temperature=0.9,
         )
         content = response.choices[0].message.content
         data = json.loads(content)
@@ -85,12 +86,29 @@ korrekt ist der 0-basierte Index der richtigen Antwort."""
                     data = data[key]
                     break
         if isinstance(data, list) and len(data) >= 5:
-            return data[:10]
+            items = data[:10]
+            return [_mische_optionen(item) for item in items]
     except Exception as e:
         print(f"[M1] Item-Generierung fehlgeschlagen: {e}")
 
-    # Fallback
-    return FALLBACK_ITEMS.get(niveau, FALLBACK_ITEMS["A2"])
+    # Fallback: zufällig mischen
+    fallback = list(FALLBACK_ITEMS.get(niveau, FALLBACK_ITEMS["A2"]))
+    random.shuffle(fallback)
+    return [_mische_optionen(item) for item in fallback[:10]]
+
+
+def _mische_optionen(item: dict) -> dict:
+    """Mischt die Antwortoptionen zufällig und passt den korrekt-Index an."""
+    item = dict(item)
+    optionen = list(item.get("optionen", []))
+    korrekt_idx = item.get("korrekt", 0)
+    if 0 <= korrekt_idx < len(optionen):
+        korrekte_antwort = optionen[korrekt_idx]
+        indizes = list(range(len(optionen)))
+        random.shuffle(indizes)
+        item["optionen"] = [optionen[i] for i in indizes]
+        item["korrekt"] = item["optionen"].index(korrekte_antwort)
+    return item
 
 
 def _niveau_beschreibung(niveau: str) -> str:

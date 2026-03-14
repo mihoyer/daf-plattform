@@ -151,22 +151,50 @@ async def berechne_gesamt_ergebnis(db: AsyncSession, session: TestSession) -> No
     if not abgeschlossene:
         return
 
-    gesamt_score = sum(m.gesamt_score for m in abgeschlossene) / len(abgeschlossene)
+    # CEFR-Gewichtung: Numerischen Wert pro Niveau
+    CEFR_WERT = {"A1": 1, "A2": 2, "B1": 3, "B2": 4, "C1": 5, "C2": 6}
+    CEFR_VON_WERT = {1: CEFRNiveau.A1, 2: CEFRNiveau.A2, 3: CEFRNiveau.B1,
+                     4: CEFRNiveau.B2, 5: CEFRNiveau.C1, 6: CEFRNiveau.C2}
+
+    # Gesamt-Score: Durchschnitt der normalisierten Modul-Scores
+    # M4/M5 (Aussprache) haben Scores 0-10, alle anderen 0-100 -> normalisieren
+    normierte_scores = []
+    for m in abgeschlossene:
+        score = m.gesamt_score
+        # Scores unter 15 sind wahrscheinlich auf 0-10 Skala -> auf 0-100 skalieren
+        if score is not None and score <= 15:
+            score = score * 10
+        normierte_scores.append(score)
+    gesamt_score = sum(normierte_scores) / len(normierte_scores)
     session.gesamt_score = round(gesamt_score, 1)
 
-    # CEFR aus Score ableiten
-    if gesamt_score >= 90:
-        session.gesamt_niveau = CEFRNiveau.C2
-    elif gesamt_score >= 78:
-        session.gesamt_niveau = CEFRNiveau.C1
-    elif gesamt_score >= 65:
-        session.gesamt_niveau = CEFRNiveau.B2
-    elif gesamt_score >= 50:
-        session.gesamt_niveau = CEFRNiveau.B1
-    elif gesamt_score >= 35:
-        session.gesamt_niveau = CEFRNiveau.A2
+    # CEFR aus Modul-CEFRs ableiten (gewichteter Durchschnitt der CEFR-Werte)
+    cefr_werte = []
+    for m in abgeschlossene:
+        if m.cefr_niveau:
+            wert = CEFR_WERT.get(m.cefr_niveau.value, 3)
+            cefr_werte.append(wert)
+
+    if cefr_werte:
+        durchschnitt = sum(cefr_werte) / len(cefr_werte)
+        # Runden zum nächsten Niveau
+        gerundet = round(durchschnitt)
+        gerundet = max(1, min(6, gerundet))
+        session.gesamt_niveau = CEFR_VON_WERT[gerundet]
     else:
-        session.gesamt_niveau = CEFRNiveau.A1
+        # Fallback: Score-basiert
+        if gesamt_score >= 90:
+            session.gesamt_niveau = CEFRNiveau.C2
+        elif gesamt_score >= 78:
+            session.gesamt_niveau = CEFRNiveau.C1
+        elif gesamt_score >= 65:
+            session.gesamt_niveau = CEFRNiveau.B2
+        elif gesamt_score >= 50:
+            session.gesamt_niveau = CEFRNiveau.B1
+        elif gesamt_score >= 35:
+            session.gesamt_niveau = CEFRNiveau.A2
+        else:
+            session.gesamt_niveau = CEFRNiveau.A1
 
     session.status = SessionStatus.abgeschlossen
     session.abgeschlossen_am = datetime.now(timezone.utc)

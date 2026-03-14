@@ -3,10 +3,21 @@ M2-Service: Lesen & Leseverstehen.
 Generiert niveau-adaptive Lesetexte und Verständnisfragen via GPT-4.1.
 """
 import json
+import random
 from openai import AsyncOpenAI
 from app.config import settings
 
 client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+# Themenpool für abwechslungsreiche Texte
+THEMEN_POOL = {
+    "A1": ["Familie und Zuhause", "Essen und Trinken", "Zahlen und Farben", "Tiere", "Körper und Gesundheit"],
+    "A2": ["Freizeit und Hobbys", "Einkaufen und Geld", "Arbeit und Berufe", "Reisen und Verkehr", "Wetter und Jahreszeiten", "Freundschaft"],
+    "B1": ["Umwelt und Natur", "Medien und Technologie", "Bildung und Schule", "Gesundheit und Ernährung", "Kultur und Traditionen", "Sport und Fitness", "Städte und Wohnen"],
+    "B2": ["Digitalisierung und Gesellschaft", "Klimawandel", "Globalisierung", "Arbeitswelt im Wandel", "Migration und Integration", "Wissenschaft und Forschung"],
+    "C1": ["Philosophie und Ethik", "Wirtschaft und Politik", "Künstliche Intelligenz", "Sprachpolitik", "Literatur und Kunst", "Demografischer Wandel"],
+    "C2": ["Erkenntnistheorie", "Postmoderne Gesellschaft", "Sprachphilosophie", "Kulturkritik"],
+}
 
 
 async def generiere_leseaufgabe(niveau: str = "B1", hilfssprache: str = "de") -> dict:
@@ -20,6 +31,7 @@ async def generiere_leseaufgabe(niveau: str = "B1", hilfssprache: str = "de") ->
         "C2": "350+ Wörter, literarische oder wissenschaftliche Texte",
     }
     vorgabe = niveau_vorgaben.get(niveau, niveau_vorgaben["B1"])
+    thema = random.choice(THEMEN_POOL.get(niveau, THEMEN_POOL["B1"]))
 
     hilfs_hinweis = ""
     if hilfssprache != "de":
@@ -30,6 +42,7 @@ async def generiere_leseaufgabe(niveau: str = "B1", hilfssprache: str = "de") ->
 
     prompt = f"""Erstelle eine Leseverstehen-Aufgabe für DaF-Lernende auf CEFR-Niveau {niveau}.
 
+Thema: {thema}
 Vorgaben für den Text: {vorgabe}
 {hilfs_hinweis}
 
