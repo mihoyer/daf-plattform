@@ -369,16 +369,44 @@ async def m4_text(token: str, db: AsyncSession = Depends(get_db)):
         if saetze:
             return {"saetze": saetze, "niveau": modul.schwierigkeitsgrad or "B1"}
 
-    # Fallback: eigene Sätze generieren
+    # GPT generiert frische Vorlese-Sätze
     niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
-    vorlese_texte = {
-        "A1": ["Ich heiße Anna.", "Ich wohne in Berlin.", "Das ist mein Haus."],
-        "A2": ["Jeden Morgen trinke ich Kaffee.", "Mein Bruder arbeitet als Arzt."],
-        "B1": ["Die Digitalisierung verändert unsere Arbeitswelt grundlegend.", "Viele Menschen nutzen täglich soziale Medien."],
-        "B2": ["Die wirtschaftlichen Folgen des Klimawandels sind noch nicht vollständig absehbar.", "Bildung gilt als wichtigster Faktor für soziale Mobilität."],
-        "C1": ["Die philosophische Frage nach dem freien Willen beschäftigt Denker seit Jahrhunderten.", "Globale Lieferketten erweisen sich in Krisenzeiten als besonders anfällig."],
+    import random
+    themen_pool = {
+        "A1": ["Familie", "Essen", "Tiere", "Farben", "Schule"],
+        "A2": ["Freizeit", "Einkaufen", "Wetter", "Reisen", "Arbeit"],
+        "B1": ["Umwelt", "Technologie", "Gesundheit", "Kultur", "Sport"],
+        "B2": ["Klimawandel", "Digitalisierung", "Migration", "Wirtschaft", "Bildung"],
+        "C1": ["Künstliche Intelligenz", "Sprachpolitik", "Philosophie", "Globalisierung"],
     }
-    saetze = vorlese_texte.get(niveau, vorlese_texte["B1"])
+    thema = random.choice(themen_pool.get(niveau, themen_pool["B1"]))
+    try:
+        from openai import AsyncOpenAI
+        from app.config import settings as cfg
+        oai = AsyncOpenAI(api_key=cfg.openai_api_key)
+        resp = await oai.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": f"""Erstelle 3 deutsche Sätze zum Thema '{thema}' für CEFR-Niveau {niveau} zum Vorlesen.
+Anforderungen: Natürliche Sprache, für das Niveau angemessene Komplexität, keine Listen.
+Antworte NUR mit JSON: {{"saetze": ["Satz 1", "Satz 2", "Satz 3"]}}"""}],
+            response_format={"type": "json_object"},
+            temperature=0.9,
+        )
+        import json as _json
+        saetze = _json.loads(resp.choices[0].message.content).get("saetze", [])
+        if not saetze:
+            raise ValueError("Leere Antwort")
+    except Exception as e:
+        print(f"[M4] Vorlese-Generierung fehlgeschlagen: {e}")
+        fallback = {
+            "A1": ["Ich heiße Anna.", "Ich wohne in Berlin.", "Das ist mein Haus."],
+            "A2": ["Jeden Morgen trinke ich Kaffee.", "Mein Bruder arbeitet als Arzt.", "Das Wetter ist heute schön."],
+            "B1": ["Die Digitalisierung verändert unsere Arbeitswelt grundlegend.", "Viele Menschen nutzen täglich soziale Medien.", "Gesunde Ernährung ist wichtig für das Wohlbefinden."],
+            "B2": ["Die wirtschaftlichen Folgen des Klimawandels sind noch nicht vollständig absehbar.", "Bildung gilt als wichtigster Faktor für soziale Mobilität.", "Digitale Technologien eröffnen neue Möglichkeiten, bringen aber auch Risiken mit sich."],
+            "C1": ["Die philosophische Frage nach dem freien Willen beschäftigt Denker seit Jahrhunderten.", "Globale Lieferketten erweisen sich in Krisenzeiten als besonders anfällig.", "Sprachliche Nuancen spiegeln kulturelle Wertvorstellungen wider."],
+        }
+        saetze = fallback.get(niveau, fallback["B1"])
+
     modul.schwierigkeitsgrad = niveau
     modul.status = ModulStatus.laufend
     await db.commit()
@@ -579,14 +607,51 @@ async def m6_aufgabe(token: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Session nicht gefunden.")
 
     niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
-    aufgaben = {
-        "A1": "Schreibe 3–4 Sätze über dich: Wie heißt du? Wo wohnst du? Was machst du?",
-        "A2": "Schreibe eine kurze Nachricht (5–6 Sätze) an einen Freund über dein Wochenende.",
-        "B1": "Schreibe einen kurzen Text (8–10 Sätze) über ein Thema, das dich interessiert.",
-        "B2": "Schreibe einen Meinungstext (12–15 Sätze) zu einem aktuellen gesellschaftlichen Thema.",
-        "C1": "Schreibe einen argumentativen Essay (150–200 Wörter) zu einer komplexen Fragestellung.",
+    import random
+
+    # Niveau-spezifische Textsorte und Länge
+    vorgaben = {
+        "A1": ("3–4 Sätze", "persönliche Vorstellung oder Alltagsbeschreibung"),
+        "A2": ("5–7 Sätze", "persönliche Nachricht oder Beschreibung"),
+        "B1": ("8–10 Sätze", "Meinungstext oder Erfahrungsbericht"),
+        "B2": ("12–15 Sätze", "Argumentativer Text oder Kommentar"),
+        "C1": ("150–200 Wörter", "Essay oder Analyse"),
+        "C2": ("200–250 Wörter", "Wissenschaftlicher oder literarischer Text"),
     }
-    aufgabe_text = aufgaben.get(niveau, aufgaben["B1"])
+    laenge, textsorte = vorgaben.get(niveau, vorgaben["B1"])
+
+    try:
+        from openai import AsyncOpenAI
+        from app.config import settings as cfg
+        oai = AsyncOpenAI(api_key=cfg.openai_api_key)
+        resp = await oai.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": f"""Erstelle eine Schreibaufgabe für DaF-Lernende auf CEFR-Niveau {niveau}.
+
+Anforderungen:
+- Textsorte: {textsorte}
+- Länge: {laenge}
+- Konkretes, interessantes Thema (nicht generisch)
+- Klare Aufgabenstellung mit 2–3 Leitfragen oder Punkten
+
+Antworte NUR mit JSON: {"aufgabe": "Die vollständige Aufgabenstellung auf Deutsch"}"""}],
+            response_format={"type": "json_object"},
+            temperature=0.9,
+        )
+        import json as _json
+        aufgabe_text = _json.loads(resp.choices[0].message.content).get("aufgabe", "")
+        if not aufgabe_text:
+            raise ValueError("Leere Antwort")
+    except Exception as e:
+        print(f"[M6] Aufgaben-Generierung fehlgeschlagen: {e}")
+        fallback = {
+            "A1": "Schreibe 3–4 Sätze über dich: Wie heißt du? Wo wohnst du? Was machst du gerne?",
+            "A2": "Du hast letzte Woche ein Konzert besucht. Schreibe eine kurze Nachricht (5–6 Sätze) an einen Freund: Was war das für ein Konzert? Wie war die Musik? Was hat dir gefallen oder nicht gefallen?",
+            "B1": "Viele junge Menschen verbringen viel Zeit mit sozialen Medien. Schreibe einen Text (8–10 Sätze): Welche Vor- und Nachteile siehst du? Wie nutzt du selbst soziale Medien? Was würdest du anderen empfehlen?",
+            "B2": "In vielen Ländern wird diskutiert, ob das Schulfach 'Digitale Kompetenz' Pflicht sein sollte. Schreibe einen Meinungstext (12–15 Sätze): Welche Argumente gibt es dafür und dagegen? Wie ist deine Meinung und warum?",
+            "C1": "Analysiere in einem Essay (150–200 Wörter) die Aussage: 'Künstliche Intelligenz wird den Arbeitsmarkt stärker verändern als die Industrialisierung.' Berücksichtige verschiedene Perspektiven und belege deine Argumentation.",
+        }
+        aufgabe_text = fallback.get(niveau, fallback["B1"])
 
     modul = _get_modul(sess, ModulTyp.m6_schreiben)
     if modul:
