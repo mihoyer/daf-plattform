@@ -1,10 +1,16 @@
 """
-M1-Service: Grammatik & Wortschatz (Multiple Choice).
-Generiert niveau-adaptive Items via GPT-4.1 und wertet sie aus.
+M1-Service: Grammatik & Wortschatz – Adaptives CAT-System.
+
+Ablauf:
+1. start()        → 3 Einstiegsfragen (A2 / B1 / B2 gemischt)
+2. naechste()     → nach jeder Antwort Niveau neu schätzen, nächste Frage generieren
+3. werte_aus()    → Endauswertung mit GPT-Analyse
+
+Jede Frage wird frisch von GPT generiert (zufälliges Thema + Grammatikfokus).
+Kein Cache, keine Wiederholungen.
 """
 import json
 import random
-import re
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -14,28 +20,95 @@ from app.models.database import CEFRNiveau
 
 client = AsyncOpenAI(api_key=settings.openai_api_key)
 
-# Statische Fallback-Items falls GPT nicht verfügbar
-FALLBACK_ITEMS = {
-    "A2": [
-        {"id": 1, "frage": "Ich ___ jeden Tag Kaffee.", "optionen": ["trinke", "trinkt", "trinkst", "trinken"], "korrekt": 0, "erklaerung": "1. Person Singular: ich trinke"},
-        {"id": 2, "frage": "Das ist ___ Buch.", "optionen": ["ein", "eine", "einen", "einem"], "korrekt": 0, "erklaerung": "Nominativ Neutrum: ein Buch"},
-        {"id": 3, "frage": "Wo ___ du gestern?", "optionen": ["warst", "bist", "hast", "wärst"], "korrekt": 0, "erklaerung": "sein im Präteritum: du warst"},
-        {"id": 4, "frage": "Ich gehe ___ Supermarkt.", "optionen": ["in den", "in dem", "in die", "in das"], "korrekt": 0, "erklaerung": "Akkusativ maskulin: in den Supermarkt"},
-        {"id": 5, "frage": "Er ___ nicht schlafen.", "optionen": ["kann", "könnte", "konnte", "kannte"], "korrekt": 0, "erklaerung": "Modalverb können: er kann"},
-        {"id": 6, "frage": "Das Wetter ist heute sehr ___.", "optionen": ["schön", "schöne", "schöner", "schönen"], "korrekt": 0, "erklaerung": "Prädikativ: kein Adjektivendung"},
-        {"id": 7, "frage": "Ich habe ___ Hunger.", "optionen": ["großen", "großem", "großer", "großes"], "korrekt": 0, "erklaerung": "Akkusativ maskulin nach haben: großen"},
-        {"id": 8, "frage": "Sie ___ morgen nach Berlin.", "optionen": ["fährt", "fahrt", "fähren", "fahren"], "korrekt": 0, "erklaerung": "3. Person Singular Vokalwechsel: fährt"},
-        {"id": 9, "frage": "Ich ___ gerne Musik.", "optionen": ["höre", "höre", "hören", "hörst"], "korrekt": 0, "erklaerung": "1. Person Singular: ich höre"},
-        {"id": 10, "frage": "Das Haus ___ meinem Vater.", "optionen": ["gehört", "gehöre", "gehören", "gehörst"], "korrekt": 0, "erklaerung": "3. Person Singular: gehört"},
-    ]
+# ── Konstanten ────────────────────────────────────────────────────────────────
+
+NIVEAUS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
+THEMEN = [
+    "Alltag und Familie", "Arbeit und Beruf", "Reisen und Urlaub",
+    "Gesundheit und Sport", "Umwelt und Natur", "Technologie und Medien",
+    "Essen und Kochen", "Wohnen und Stadt", "Bildung und Schule",
+    "Freizeit und Hobbys", "Einkaufen und Konsum", "Kultur und Gesellschaft",
+    "Verkehr und Mobilität", "Politik und Gesellschaft", "Wissenschaft und Forschung",
+]
+
+GRAMMATIK_FOKUS = [
+    "Verbkonjugation und Tempus (Präsens, Perfekt, Präteritum)",
+    "Kasus (Nominativ, Akkusativ, Dativ, Genitiv) und Artikel",
+    "Präpositionen mit Kasus",
+    "Modalverben und Infinitivkonstruktionen",
+    "Nebensätze und Konjunktionen (weil, dass, obwohl, wenn...)",
+    "Adjektivdeklination und Komparation",
+    "Passiv und Konjunktiv II",
+    "Wortschatz und Kollokationen",
+    "Trennbare und untrennbare Verben",
+    "Relativsätze und Relativpronomen",
+]
+
+NIVEAU_BESCHREIBUNGEN = {
+    "A1": "Sehr einfach: sein/haben, Grundwortschatz, einfachste Sätze",
+    "A2": "Einfach: Präsens aller Verben, bestimmte/unbestimmte Artikel, einfache Präpositionen",
+    "B1": "Mittel: Perfekt, Modalverben, Nebensätze, alle Kasus, erweiterter Wortschatz",
+    "B2": "Fortgeschritten: Konjunktiv II, Passiv, komplexe Satzstrukturen, idiomatischer Ausdruck",
+    "C1": "Sehr fortgeschritten: stilistische Feinheiten, seltene Konstruktionen, Fachvokabular",
+    "C2": "Mastery: Nuancen, literarische Sprache, höchste sprachliche Präzision",
 }
 
+# Einstiegs-Niveaus: breite Streuung für schnelle Einschätzung
+EINSTIEGS_NIVEAUS = ["A2", "B1", "B2"]
 
-async def generiere_items(niveau: str = "B1", hilfssprache: str = "de") -> list[dict]:
+
+# ── Niveau-Schätzung (IRT-vereinfacht) ───────────────────────────────────────
+
+def schaetze_niveau(antworten_verlauf: list[dict]) -> str:
     """
-    Generiert 10 adaptive MC-Items für das angegebene CEFR-Niveau.
-    Aufgabenanweisungen werden in der Hilfssprache ergänzt wenn nicht Deutsch.
+    Schätzt das aktuelle Niveau basierend auf dem bisherigen Antwortverlauf.
+    antworten_verlauf: [{"niveau": "B1", "korrekt": True}, ...]
+    
+    Algorithmus: Gewichteter Durchschnitt der Niveau-Indizes,
+    richtige Antworten ziehen nach oben, falsche nach unten.
     """
+    if not antworten_verlauf:
+        return "B1"
+
+    niveau_punkte = 0.0
+    gewicht_gesamt = 0.0
+
+    for i, eintrag in enumerate(antworten_verlauf):
+        # Neuere Antworten stärker gewichten
+        gewicht = 1.0 + i * 0.3
+        niveau_idx = NIVEAUS.index(eintrag["niveau"])
+        
+        if eintrag["korrekt"]:
+            # Richtig → Niveau-Index + 1 (tendiert nach oben)
+            ziel_idx = min(niveau_idx + 1, len(NIVEAUS) - 1)
+        else:
+            # Falsch → Niveau-Index - 1 (tendiert nach unten)
+            ziel_idx = max(niveau_idx - 1, 0)
+        
+        niveau_punkte += ziel_idx * gewicht
+        gewicht_gesamt += gewicht
+
+    geschaetzter_idx = round(niveau_punkte / gewicht_gesamt)
+    geschaetzter_idx = max(0, min(geschaetzter_idx, len(NIVEAUS) - 1))
+    return NIVEAUS[geschaetzter_idx]
+
+
+# ── GPT-Generierung ───────────────────────────────────────────────────────────
+
+async def generiere_eine_frage(
+    niveau: str,
+    hilfssprache: str = "de",
+    bereits_verwendet: list[str] | None = None,
+    item_id: int = 1,
+) -> dict:
+    """
+    Generiert genau eine MC-Frage für das angegebene Niveau.
+    Zufälliges Thema + Grammatikfokus für maximale Variation.
+    """
+    thema = random.choice(THEMEN)
+    fokus = random.choice(GRAMMATIK_FOKUS)
+
     hilfs_hinweis = ""
     if hilfssprache != "de":
         sprach_namen = {
@@ -44,47 +117,37 @@ async def generiere_items(niveau: str = "B1", hilfssprache: str = "de") -> list[
             "it": "Italiano", "es": "Español"
         }
         sprach_name = sprach_namen.get(hilfssprache, hilfssprache)
-        hilfs_hinweis = f'\nFüge für jede Frage ein Feld "hinweis_{hilfssprache}" hinzu mit einer kurzen Erklärung der Aufgabe auf {sprach_name}.'
+        hilfs_hinweis = f'\nFüge ein Feld "hinweis_{hilfssprache}" mit einer kurzen Aufgabenerklärung auf {sprach_name} hinzu.'
 
-    # Zufälliges Thema und Grammatikfokus für Variation
-    themen = [
-        "Alltag und Familie", "Arbeit und Beruf", "Reisen und Urlaub",
-        "Gesundheit und Sport", "Umwelt und Natur", "Technologie und Medien",
-        "Essen und Kochen", "Wohnen und Stadt", "Bildung und Schule",
-        "Freizeit und Hobbys", "Einkaufen und Konsum", "Kultur und Gesellschaft",
-    ]
-    grammatik_fokus = [
-        "Verbkonjugation und Tempus", "Kasus und Artikel", "Präpositionen",
-        "Modalverben und Infinitivkonstruktionen", "Nebensätze und Konjunktionen",
-        "Adjektivdeklination", "Passiv und Konjunktiv", "Wortschatz und Kollokationen",
-    ]
-    thema = random.choice(themen)
-    fokus = random.choice(grammatik_fokus)
+    vermeidungs_hinweis = ""
+    if bereits_verwendet:
+        beispiele = ", ".join(bereits_verwendet[-5:])
+        vermeidungs_hinweis = f'\nVermeide Fragen die diesen ähneln: {beispiele}'
 
-    prompt = f"""Du bist ein DaF-Experte. Erstelle genau 10 Multiple-Choice-Items zum Testen von Grammatik und Wortschatz auf CEFR-Niveau {niveau}.
+    prompt = f"""Du bist ein DaF-Experte. Erstelle genau EINE Multiple-Choice-Frage für CEFR-Niveau {niveau}.
 
-Thematischer Kontext: {thema}
+Thema: {thema}
 Grammatischer Schwerpunkt: {fokus}
-
-Anforderungen:
-- Jedes Item hat genau 4 Antwortoptionen (A, B, C, D)
-- Genau eine Option ist korrekt
-- Die Distraktoren sind plausibel (typische Lernerfehler)
-- Bette die Fragen in den Kontext "{thema}" ein (authentische Sätze)
-- Niveau {niveau}: {_niveau_beschreibung(niveau)}
+Niveau {niveau}: {NIVEAU_BESCHREIBUNGEN[niveau]}
+{vermeidungs_hinweis}
 {hilfs_hinweis}
 
-Antworte ausschließlich mit einem JSON-Array:
-[
-  {{
-    "id": 1,
-    "frage": "Lückensatz oder Frage auf Deutsch",
-    "optionen": ["Option A", "Option B", "Option C", "Option D"],
-    "korrekt": 0,
-    "erklaerung": "Kurze grammatische Erklärung auf Deutsch"
-  }},
-  ...
-]
+Anforderungen:
+- Authentischer, natürlicher Satz zum Thema "{thema}"
+- Genau 4 Antwortoptionen, genau eine korrekt
+- Distraktoren sind plausibel (typische Lernerfehler auf diesem Niveau)
+- Kurze, präzise grammatische Erklärung
+
+Antworte ausschließlich mit diesem JSON-Objekt:
+{{
+  "id": {item_id},
+  "frage": "Lückensatz oder Frage auf Deutsch",
+  "optionen": ["Option A", "Option B", "Option C", "Option D"],
+  "korrekt": 0,
+  "erklaerung": "Grammatische Erklärung",
+  "niveau": "{niveau}",
+  "thema": "{thema}"
+}}
 
 korrekt ist der 0-basierte Index der richtigen Antwort."""
 
@@ -93,27 +156,186 @@ korrekt ist der 0-basierte Index der richtigen Antwort."""
             model="gpt-4.1",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            temperature=0.9,
+            temperature=0.95,
+            max_tokens=400,
         )
-        content = response.choices[0].message.content
-        data = json.loads(content)
-        # GPT gibt manchmal {"items": [...]} zurück
-        if isinstance(data, dict):
-            for key in ("items", "fragen", "aufgaben"):
-                if key in data:
-                    data = data[key]
-                    break
-        if isinstance(data, list) and len(data) >= 5:
-            items = data[:10]
-            return [_mische_optionen(item) for item in items]
+        data = json.loads(response.choices[0].message.content)
+        # Sicherstellen dass alle Pflichtfelder vorhanden sind
+        if all(k in data for k in ("frage", "optionen", "korrekt")):
+            data["id"] = item_id
+            data["niveau"] = niveau
+            return _mische_optionen(data)
     except Exception as e:
-        print(f"[M1] Item-Generierung fehlgeschlagen: {e}")
+        print(f"[M1] Fragen-Generierung fehlgeschlagen (Niveau {niveau}): {e}")
 
-    # Fallback: zufällig mischen
-    fallback = list(FALLBACK_ITEMS.get(niveau, FALLBACK_ITEMS["A2"]))
-    random.shuffle(fallback)
-    return [_mische_optionen(item) for item in fallback[:10]]
+    # Fallback: eine zufällige Frage aus dem Fallback-Pool
+    return _fallback_frage(niveau, item_id)
 
+
+async def generiere_einstiegsfragen(hilfssprache: str = "de") -> list[dict]:
+    """
+    Generiert 3 Einstiegsfragen mit breiter Niveau-Streuung (A2, B1, B2).
+    Reihenfolge wird gemischt damit das Niveau nicht vorhersehbar ist.
+    """
+    import asyncio
+    einstiegs_niveaus = EINSTIEGS_NIVEAUS.copy()
+    random.shuffle(einstiegs_niveaus)
+
+    aufgaben = [
+        generiere_eine_frage(niveau, hilfssprache, item_id=i + 1)
+        for i, niveau in enumerate(einstiegs_niveaus)
+    ]
+    fragen = await asyncio.gather(*aufgaben)
+    return list(fragen)
+
+
+# ── Öffentliche Service-Funktionen ────────────────────────────────────────────
+
+async def starte_adaptiven_test(hilfssprache: str = "de") -> dict:
+    """
+    Startet den adaptiven Test.
+    Gibt 3 Einstiegsfragen zurück + initialen Zustand.
+    """
+    fragen = await generiere_einstiegsfragen(hilfssprache)
+    return {
+        "fragen": fragen,
+        "geschaetztes_niveau": "B1",
+        "antworten_verlauf": [],
+        "naechste_id": len(fragen) + 1,
+        "gesamt_fragen": 10,
+        "phase": "einstieg",
+    }
+
+
+async def naechste_frage(
+    zustand: dict,
+    item_id: int,
+    gewaehlt: int,
+    hilfssprache: str = "de",
+) -> dict:
+    """
+    Verarbeitet eine Antwort und generiert die nächste adaptive Frage.
+    
+    zustand: {antworten_verlauf, naechste_id, bereits_gefragt_fragen}
+    item_id: ID der beantworteten Frage
+    gewaehlt: Index der gewählten Option
+    """
+    antworten_verlauf = zustand.get("antworten_verlauf", [])
+    naechste_id = zustand.get("naechste_id", 4)
+    bereits_gefragt = zustand.get("bereits_gefragt_fragen", [])
+    alle_fragen = zustand.get("alle_fragen", [])
+
+    # Aktuelle Frage aus dem Verlauf finden
+    aktuelle_frage = next(
+        (f for f in alle_fragen if f["id"] == item_id), None
+    )
+    
+    korrekt = False
+    fragen_niveau = "B1"
+    if aktuelle_frage:
+        korrekt = gewaehlt == aktuelle_frage.get("korrekt", -1)
+        fragen_niveau = aktuelle_frage.get("niveau", "B1")
+
+    # Antwortverlauf aktualisieren
+    antworten_verlauf.append({
+        "item_id": item_id,
+        "niveau": fragen_niveau,
+        "korrekt": korrekt,
+        "gewaehlt": gewaehlt,
+    })
+
+    # Neues Niveau schätzen
+    neues_niveau = schaetze_niveau(antworten_verlauf)
+
+    # Bereits verwendete Fragen-Texte für Vermeidung
+    bereits_verwendet = [f.get("frage", "") for f in alle_fragen]
+
+    # Nächste Frage generieren
+    neue_frage = await generiere_eine_frage(
+        neues_niveau, hilfssprache, bereits_verwendet, naechste_id
+    )
+
+    return {
+        "frage": neue_frage,
+        "geschaetztes_niveau": neues_niveau,
+        "antworten_verlauf": antworten_verlauf,
+        "naechste_id": naechste_id + 1,
+        "korrekt": korrekt,
+    }
+
+
+async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
+    """
+    Endauswertung: berechnet Score, CEFR und detaillierte Analyse.
+    antworten: {"1": 2, "2": 0, ...} (item_id → gewählter Index)
+    """
+    korrekt_count = 0
+    total = len(alle_fragen)
+    details = []
+    antworten_verlauf = []
+
+    for frage in alle_fragen:
+        item_id = str(frage["id"])
+        gewaehlt = antworten.get(item_id, -1)
+        ist_korrekt = gewaehlt == frage.get("korrekt", -99)
+        if ist_korrekt:
+            korrekt_count += 1
+
+        antworten_verlauf.append({
+            "niveau": frage.get("niveau", "B1"),
+            "korrekt": ist_korrekt,
+        })
+
+        details.append({
+            "id": frage["id"],
+            "frage": frage["frage"],
+            "optionen": frage.get("optionen", []),
+            "gewaehlt": gewaehlt,
+            "korrekt": frage.get("korrekt"),
+            "ist_korrekt": ist_korrekt,
+            "erklaerung": frage.get("erklaerung", ""),
+            "niveau": frage.get("niveau", "B1"),
+            "thema": frage.get("thema", ""),
+        })
+
+    prozent = (korrekt_count / total * 100) if total > 0 else 0
+    score = round(prozent, 1)
+
+    # CEFR aus adaptivem Verlauf + Prozent kombinieren
+    adaptives_niveau = schaetze_niveau(antworten_verlauf)
+    
+    # Prozent-basiertes CEFR als Kontrolle
+    if prozent >= 90:
+        prozent_cefr = "C1"
+    elif prozent >= 75:
+        prozent_cefr = "B2"
+    elif prozent >= 55:
+        prozent_cefr = "B1"
+    elif prozent >= 35:
+        prozent_cefr = "A2"
+    else:
+        prozent_cefr = "A1"
+
+    # Kombiniertes CEFR: Durchschnitt aus adaptivem und prozentbasiertem Niveau
+    adaptiv_idx = NIVEAUS.index(adaptives_niveau)
+    prozent_idx = NIVEAUS.index(prozent_cefr)
+    final_idx = round((adaptiv_idx + prozent_idx) / 2)
+    final_cefr = NIVEAUS[final_idx]
+
+    return {
+        "score": score,
+        "korrekt": korrekt_count,
+        "total": total,
+        "prozent": prozent,
+        "cefr": final_cefr,
+        "adaptives_niveau": adaptives_niveau,
+        "details": details,
+        "staerken": _analysiere_staerken(details),
+        "schwaechen": _analysiere_schwaechen(details),
+    }
+
+
+# ── Hilfsfunktionen ───────────────────────────────────────────────────────────
 
 def _mische_optionen(item: dict) -> dict:
     """Mischt die Antwortoptionen zufällig und passt den korrekt-Index an."""
@@ -129,75 +351,44 @@ def _mische_optionen(item: dict) -> dict:
     return item
 
 
-def _niveau_beschreibung(niveau: str) -> str:
-    beschreibungen = {
-        "A1": "Sehr einfach: Grundverben (sein, haben), einfache Sätze, Zahlen, Farben",
-        "A2": "Einfach: Präsens aller Verben, Artikel, einfache Präpositionen, Alltagswortschatz",
-        "B1": "Mittel: Perfekt, Modalverben, Nebensätze, Kasus, erweiterter Wortschatz",
-        "B2": "Fortgeschritten: Konjunktiv, Passiv, komplexe Satzstrukturen, idiomatischer Ausdruck",
-        "C1": "Sehr fortgeschritten: Stilistische Feinheiten, seltene Konstruktionen, Fachvokabular",
-        "C2": "Mastery: Nuancen, literarische Sprache, höchste Präzision",
+def _fallback_frage(niveau: str, item_id: int) -> dict:
+    """Notfall-Fallback falls GPT komplett ausfällt."""
+    fallbacks = {
+        "A1": {"frage": "Ich ___ Peter.", "optionen": ["heiße", "heißt", "heißen", "heiß"], "korrekt": 0, "erklaerung": "1. Person Singular: ich heiße"},
+        "A2": {"frage": "Gestern ___ ich ins Kino gegangen.", "optionen": ["bin", "habe", "war", "wurde"], "korrekt": 0, "erklaerung": "Perfekt mit 'sein' bei Bewegungsverben"},
+        "B1": {"frage": "Er sagte, ___ er morgen komme.", "optionen": ["dass", "das", "ob", "weil"], "korrekt": 0, "erklaerung": "Indirekter Satz mit 'dass'"},
+        "B2": {"frage": "Wenn ich mehr Zeit ___, würde ich reisen.", "optionen": ["hätte", "habe", "hatte", "haben"], "korrekt": 0, "erklaerung": "Konjunktiv II in Konditionalsätzen"},
+        "C1": {"frage": "Die Entscheidung, ___ er sich widersetzt hatte, wurde revidiert.", "optionen": ["der", "die", "das", "dem"], "korrekt": 0, "erklaerung": "Relativpronomen im Dativ nach 'widersetzen'"},
+        "C2": {"frage": "___ er auch noch so fleißig lernte, reichte es nicht.", "optionen": ["Mochte", "Möge", "Mag", "Möchte"], "korrekt": 0, "erklaerung": "Konzessiver Konjunktiv: 'mochte... auch'"},
     }
-    return beschreibungen.get(niveau, "Mittleres Niveau")
+    base = fallbacks.get(niveau, fallbacks["B1"]).copy()
+    base["id"] = item_id
+    base["niveau"] = niveau
+    base["thema"] = "Grammatik"
+    return _mische_optionen(base)
 
 
-async def werte_aus(items: list[dict], antworten: dict[str, int]) -> dict:
-    """
-    Wertet die MC-Antworten aus und berechnet Score + CEFR-Niveau.
-    antworten: {"1": 2, "2": 0, ...} (item_id -> gewählter Index)
-    """
-    korrekt = 0
-    total = len(items)
-    details = []
+def _analysiere_staerken(details: list[dict]) -> list[str]:
+    """Leitet Stärken aus den korrekten Antworten ab."""
+    korrekte_niveaus = [d["niveau"] for d in details if d["ist_korrekt"]]
+    staerken = []
+    if "B2" in korrekte_niveaus or "C1" in korrekte_niveaus:
+        staerken.append("Beherrschung komplexer Grammatikstrukturen")
+    if korrekte_niveaus.count("B1") >= 2:
+        staerken.append("Solide Grundgrammatik auf B1-Niveau")
+    if korrekte_niveaus.count("A2") >= 1:
+        staerken.append("Sichere Basis in elementaren Strukturen")
+    return staerken or ["Grundkenntnisse vorhanden"]
 
-    for item in items:
-        item_id = str(item["id"])
-        gewaehlt = antworten.get(item_id, -1)
-        ist_korrekt = gewaehlt == item.get("korrekt", -99)
-        if ist_korrekt:
-            korrekt += 1
-        details.append({
-            "id": item["id"],
-            "frage": item["frage"],
-            "gewaehlt": gewaehlt,
-            "korrekt": item.get("korrekt"),
-            "ist_korrekt": ist_korrekt,
-            "erklaerung": item.get("erklaerung", ""),
-        })
 
-    prozent = (korrekt / total * 100) if total > 0 else 0
-    score = round(prozent, 1)
-
-    # Grob-Niveau aus Prozent
-    if prozent >= 85:
-        grob_niveau = "hoch"
-        naechstes_niveau = "B2"
-    elif prozent >= 40:
-        grob_niveau = "mittel"
-        naechstes_niveau = "B1"
-    else:
-        grob_niveau = "niedrig"
-        naechstes_niveau = "A2"
-
-    # CEFR-Einstufung
-    if prozent >= 90:
-        cefr = CEFRNiveau.C1
-    elif prozent >= 75:
-        cefr = CEFRNiveau.B2
-    elif prozent >= 55:
-        cefr = CEFRNiveau.B1
-    elif prozent >= 35:
-        cefr = CEFRNiveau.A2
-    else:
-        cefr = CEFRNiveau.A1
-
-    return {
-        "score": score,
-        "korrekt": korrekt,
-        "total": total,
-        "prozent": prozent,
-        "cefr": cefr.value,
-        "grob_niveau": grob_niveau,
-        "naechstes_niveau": naechstes_niveau,
-        "details": details,
-    }
+def _analysiere_schwaechen(details: list[dict]) -> list[str]:
+    """Leitet Schwächen aus den falschen Antworten ab."""
+    falsche_niveaus = [d["niveau"] for d in details if not d["ist_korrekt"]]
+    schwaechen = []
+    if "A2" in falsche_niveaus:
+        schwaechen.append("Grundlegende Grammatikstrukturen (A2) noch unsicher")
+    if "B1" in falsche_niveaus:
+        schwaechen.append("Mittelstufen-Grammatik (B1) ausbaufähig")
+    if "B2" in falsche_niveaus:
+        schwaechen.append("Komplexe Strukturen (B2) noch nicht gefestigt")
+    return schwaechen or ["Einzelne Lücken in spezifischen Strukturen"]
