@@ -165,10 +165,15 @@ async def get_publishable_key():
     return {"key": stripe_service.get_publishable_key()}
 
 
-# ── M1: Grammatik & Wortschatz ───────────────────────────────────────────────
+# ── M1: Grammatik & Wortschatz (Adaptives CAT) ──────────────────────────────
 
 @router.get("/api/m1/{token}/items")
 async def m1_items(token: str, db: AsyncSession = Depends(get_db)):
+    """
+    Startet den adaptiven M1-Test.
+    Gibt 3 Einstiegsfragen (A2/B1/B2 gemischt) zurück.
+    Kein Cache – jeder Aufruf generiert frische Fragen.
+    """
     sess = await session_service.lade_session(db, token)
     if not sess or sess.zahlungs_status not in (ZahlungsStatus.bezahlt, ZahlungsStatus.demo):
         raise HTTPException(status_code=403, detail="Session nicht bezahlt oder nicht gefunden.")
@@ -177,24 +182,86 @@ async def m1_items(token: str, db: AsyncSession = Depends(get_db)):
     if not modul:
         raise HTTPException(status_code=404, detail="M1 nicht in diesem Paket.")
 
-    # Items aus Cache oder neu generieren
-    if modul.roh_antworten_json:
-        cached = modul.get_roh_antworten()
-        if "items" in cached:
-            return {"items": cached["items"], "niveau": modul.schwierigkeitsgrad or "B1"}
+    # Adaptiven Test starten – immer frisch generieren (kein Cache)
+    zustand = await m1_service.starte_adaptiven_test(sess.hilfssprache.value)
 
-    niveau = "B1"
-    items = await m1_service.generiere_items(niveau, sess.hilfssprache.value)
-    modul.set_roh_antworten({"items": items})
-    modul.schwierigkeitsgrad = niveau
+    # Zustand im Modul speichern
+    modul.set_roh_antworten({
+        "alle_fragen": zustand["fragen"],
+        "antworten_verlauf": [],
+        "naechste_id": zustand["naechste_id"],
+        "geschaetztes_niveau": zustand["geschaetztes_niveau"],
+    })
+    modul.schwierigkeitsgrad = "B1"
     modul.status = ModulStatus.laufend
     await db.commit()
 
-    return {"items": items, "niveau": niveau}
+    return {
+        "items": zustand["fragen"],
+        "geschaetztes_niveau": zustand["geschaetztes_niveau"],
+        "gesamt_fragen": 10,
+        "adaptiv": True,
+    }
+
+
+@router.post("/api/m1/{token}/naechste")
+async def m1_naechste(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Verarbeitet eine Antwort und gibt die nächste adaptive Frage zurück.
+    Body: {"item_id": 1, "gewaehlt": 2}
+    """
+    sess = await session_service.lade_session(db, token)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    modul = _get_modul(sess, ModulTyp.m1_grammatik)
+    if not modul:
+        raise HTTPException(status_code=404, detail="M1 nicht gefunden.")
+
+    body = await request.json()
+    item_id = body.get("item_id")
+    gewaehlt = body.get("gewaehlt", -1)
+
+    cached = modul.get_roh_antworten() or {}
+    alle_fragen = cached.get("alle_fragen", [])
+    antworten_verlauf = cached.get("antworten_verlauf", [])
+    naechste_id = cached.get("naechste_id", 4)
+
+    zustand = {
+        "alle_fragen": alle_fragen,
+        "antworten_verlauf": antworten_verlauf,
+        "naechste_id": naechste_id,
+    }
+
+    ergebnis = await m1_service.naechste_frage(
+        zustand, item_id, gewaehlt, sess.hilfssprache.value
+    )
+
+    # Zustand aktualisieren
+    alle_fragen.append(ergebnis["frage"])
+    modul.set_roh_antworten({
+        "alle_fragen": alle_fragen,
+        "antworten_verlauf": ergebnis["antworten_verlauf"],
+        "naechste_id": ergebnis["naechste_id"],
+        "geschaetztes_niveau": ergebnis["geschaetztes_niveau"],
+    })
+    modul.schwierigkeitsgrad = ergebnis["geschaetztes_niveau"]
+    await db.commit()
+
+    return {
+        "frage": ergebnis["frage"],
+        "geschaetztes_niveau": ergebnis["geschaetztes_niveau"],
+        "korrekt": ergebnis["korrekt"],
+        "naechste_id": ergebnis["naechste_id"],
+    }
 
 
 @router.post("/api/m1/{token}/submit")
 async def m1_submit(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Endauswertung nach allen 10 Fragen.
+    Body: {"antworten": {"1": 2, "2": 0, ...}}
+    """
     sess = await session_service.lade_session(db, token)
     if not sess:
         raise HTTPException(status_code=404, detail="Session nicht gefunden.")
@@ -206,10 +273,10 @@ async def m1_submit(token: str, request: Request, db: AsyncSession = Depends(get
     body = await request.json()
     antworten = body.get("antworten", {})
 
-    cached = modul.get_roh_antworten()
-    items = cached.get("items", [])
+    cached = modul.get_roh_antworten() or {}
+    alle_fragen = cached.get("alle_fragen", [])
 
-    auswertung = await m1_service.werte_aus(items, antworten)
+    auswertung = await m1_service.werte_aus(alle_fragen, antworten)
 
     modul.set_ki_analyse(auswertung)
     modul.gesamt_score = auswertung["score"]
@@ -217,10 +284,8 @@ async def m1_submit(token: str, request: Request, db: AsyncSession = Depends(get
     modul.status = ModulStatus.abgeschlossen
     modul.abgeschlossen_am = datetime.now(timezone.utc)
 
-    # Grob-Niveau in Session speichern
     sess.grob_niveau = CEFRNiveau(auswertung["cefr"])
     sess.status = SessionStatus.laufend
-
     await db.commit()
 
     if sess.alle_abgeschlossen():
@@ -241,11 +306,7 @@ async def m2_aufgabe(token: str, db: AsyncSession = Depends(get_db)):
     if not modul:
         raise HTTPException(status_code=404, detail="M2 nicht in diesem Paket.")
 
-    if modul.roh_antworten_json:
-        cached = modul.get_roh_antworten()
-        if "aufgabe" in cached:
-            return cached["aufgabe"]
-
+    # Adaptives Niveau aus M1-Ergebnis übernehmen, immer frisch generieren
     niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
     aufgabe = await m2_service.generiere_leseaufgabe(niveau, sess.hilfssprache.value)
     modul.set_roh_antworten({"aufgabe": aufgabe})
@@ -302,11 +363,7 @@ async def m3_aufgabe(token: str, db: AsyncSession = Depends(get_db)):
     if not modul:
         raise HTTPException(status_code=404, detail="M3 nicht in diesem Paket.")
 
-    if modul.roh_antworten_json:
-        cached = modul.get_roh_antworten()
-        if "aufgabe" in cached:
-            return cached["aufgabe"]
-
+    # Adaptives Niveau aus M1-Ergebnis übernehmen, immer frisch generieren
     niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
     aufgabe = await m3_service.generiere_hoeraufgabe(niveau, sess.hilfssprache.value)
     modul.set_roh_antworten({"aufgabe": aufgabe})
@@ -502,16 +559,51 @@ async def m5_thema(token: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Session nicht gefunden.")
 
     niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
-    themen = {
-        "A1": ["Stell dich kurz vor.", "Beschreibe deine Familie.", "Was isst du gerne?"],
-        "A2": ["Erzähl von deinem Alltag.", "Was machst du in deiner Freizeit?", "Beschreibe deine Wohnung."],
-        "B1": ["Erzähl von deinem letzten Wochenende.", "Was sind deine Zukunftspläne?", "Beschreibe eine Person, die du bewunderst."],
-        "B2": ["Diskutiere Vor- und Nachteile der Digitalisierung.", "Was denkst du über Homeoffice?", "Beschreibe eine wichtige Entscheidung in deinem Leben."],
-        "C1": ["Analysiere die Auswirkungen des Klimawandels auf die Gesellschaft.", "Diskutiere ethische Fragen der KI.", "Welche Rolle spielt Sprache in der Identitätsbildung?"],
+
+    # Niveau-spezifische Vorgaben für Sprechaufgabe
+    vorgaben = {
+        "A1": ("1 Minute", "einfache Selbstvorstellung oder Alltagsbeschreibung", "Einfache Sätze, Präsens"),
+        "A2": ("1–2 Minuten", "Erzählung aus dem Alltag oder Freizeitbeschreibung", "Einfache Verbindungen, Vergangenheit"),
+        "B1": ("2 Minuten", "Meinungs\u00e4u\u00dferung oder Erfahrungsbericht", "Begr\u00fcndungen, Nebens\u00e4tze"),
+        "B2": ("2–3 Minuten", "Argumentativer Vortrag oder Diskussion", "Komplexe Strukturen, Modalit\u00e4t"),
+        "C1": ("3 Minuten", "Analyse oder kritische Auseinandersetzung", "Nuancierte Sprache, Fachvokabular"),
     }
-    import random
-    thema_liste = themen.get(niveau, themen["B1"])
-    thema = random.choice(thema_liste)
+    dauer, aufgabentyp, sprachl_anforderungen = vorgaben.get(niveau, vorgaben["B1"])
+
+    try:
+        from openai import AsyncOpenAI
+        from app.config import settings as cfg
+        import random
+        oai = AsyncOpenAI(api_key=cfg.openai_api_key)
+        resp = await oai.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": f"""Erstelle eine m\u00fcndliche Sprechaufgabe f\u00fcr DaF-Lernende auf CEFR-Niveau {niveau}.
+
+Anforderungen:
+- Aufgabentyp: {aufgabentyp}
+- Sprechdauer: {dauer}
+- Sprachliche Anforderungen: {sprachl_anforderungen}
+- Konkretes, interessantes Thema (nicht generisch, nicht immer Klimawandel)
+- 2-3 konkrete Leitfragen oder Sprechimpulse
+
+Antworte NUR mit JSON: {{\"thema\": \"Kurzer Titel\", \"aufgabe\": \"Die vollst\u00e4ndige Aufgabenstellung mit Leitfragen\"}}"""}],
+            response_format={"type": "json_object"},
+            temperature=0.9,
+        )
+        import json as _json
+        data = _json.loads(resp.choices[0].message.content)
+        thema = data.get("aufgabe") or data.get("thema", "Freies Sprechen")
+    except Exception as e:
+        print(f"[M5] Thema-Generierung fehlgeschlagen: {e}")
+        import random
+        fallback = {
+            "A1": "Stell dich vor: Wie hei\u00dft du? Wo wohnst du? Was machst du gerne?",
+            "A2": "Erz\u00e4hl von deiner Woche: Was hast du gemacht? Was war sch\u00f6n? Was war schwierig?",
+            "B1": "Beschreibe eine Person, die du bewunderst: Wer ist das? Warum bewunderst du sie? Was hast du von ihr gelernt?",
+            "B2": "Diskutiere: Sollte das Studium in Deutschland kostenlos sein? Welche Argumente gibt es daf\u00fcr und dagegen? Was ist deine Meinung?",
+            "C1": "Analysiere: Inwiefern ver\u00e4ndert k\u00fcnstliche Intelligenz unsere Vorstellung von Kreativit\u00e4t und k\u00fcnstlerischem Ausdruck? Ber\u00fccksichtige verschiedene Perspektiven.",
+        }
+        thema = fallback.get(niveau, fallback["B1"])
 
     modul = _get_modul(sess, ModulTyp.m5_sprechen)
     if modul:
