@@ -105,6 +105,28 @@ let aufnahmeStart = null;
 let timerInterval = null;
 let modus = 'schnell';
 let aufgabeId = null;
+let aufnahmeMimeType = 'audio/webm';  // wird dynamisch gesetzt
+
+// Bestes unterstütztes Format ermitteln (iOS Safari: mp4, andere: webm)
+function getBestMimeType() {
+  const typen = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+  ];
+  for (const t of typen) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';  // Browser-Standard
+}
+
+function getDateiendung(mimeType) {
+  if (mimeType.includes('mp4')) return '.mp4';
+  if (mimeType.includes('ogg')) return '.ogg';
+  return '.webm';
+}
 
 async function ladeAufgabe() {
   try {
@@ -144,12 +166,21 @@ async function starteAufnahme() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+    // Bestes Format wählen
+    aufnahmeMimeType = getBestMimeType();
+    const options = aufnahmeMimeType ? { mimeType: aufnahmeMimeType } : {};
+    mediaRecorder = new MediaRecorder(stream, options);
+    // Tatsächlich verwendetes Format merken
+    aufnahmeMimeType = mediaRecorder.mimeType || aufnahmeMimeType || 'audio/webm';
+
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = () => {
-      audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      audioBlob = new Blob(audioChunks, { type: aufnahmeMimeType });
       const url = URL.createObjectURL(audioBlob);
-      document.getElementById('audio-player').src = url;
+      const player = document.getElementById('audio-player');
+      player.src = url;
+      player.type = aufnahmeMimeType;
       document.getElementById('recorder-container').classList.remove('recording');
       document.getElementById('recorder-btn').className = 'recorder-btn done';
       document.getElementById('recorder-btn').textContent = '✓';
@@ -177,7 +208,7 @@ async function starteAufnahme() {
       if (sek >= 180) stoppeAufnahme();
     }, 500);
   } catch (e) {
-    alert('Mikrofon-Zugriff verweigert. Bitte erlaube den Zugriff auf das Mikrofon.');
+    alert('Mikrofon-Zugriff verweigert. Bitte erlaube den Zugriff auf das Mikrofon in den Einstellungen.');
   }
 }
 
@@ -204,21 +235,31 @@ async function sendeAudio() {
   document.getElementById('analyse-overlay').classList.remove('hidden');
   simuliereProgress();
 
+  // Dateiname mit korrekter Endung
+  const endung = getDateiendung(aufnahmeMimeType);
+  const dateiname = `aufnahme${endung}`;
+
   const formData = new FormData();
-  formData.append('audio', audioBlob, 'aufnahme.webm');
+  formData.append('audio', audioBlob, dateiname);
   formData.append('modus', modus);
   formData.append('aufgabe_id', aufgabeId || '');
+  formData.append('mime_type', aufnahmeMimeType);
 
   try {
-    // Erst hochladen, dann analysieren
     const uploadRes = await fetch(`/api/m5/${token}/upload`, { method: 'POST', body: formData });
-    if (!uploadRes.ok) throw new Error((await uploadRes.json()).detail || 'Upload fehlgeschlagen');
+    if (!uploadRes.ok) {
+      const err = await uploadRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Upload fehlgeschlagen');
+    }
     const analyseRes = await fetch(`/api/m5/${token}/analysiere`, { method: 'POST' });
-    if (!analyseRes.ok) throw new Error((await analyseRes.json()).detail || 'Analyse fehlgeschlagen');
+    if (!analyseRes.ok) {
+      const err = await analyseRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Analyse fehlgeschlagen');
+    }
     window.location.href = await naechstesModul() || `/ergebnis/${token}`;
   } catch (e) {
     document.getElementById('analyse-overlay').classList.add('hidden');
-    alert(`Analysefehler: ${e.message}`);
+    alert(`Fehler: ${e.message}\n\nBitte versuche es erneut.`);
   }
 }
 

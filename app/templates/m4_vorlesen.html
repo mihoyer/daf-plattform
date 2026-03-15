@@ -73,13 +73,34 @@
 const token = '{{ token }}';
 let mediaRecorder = null, audioChunks = [], audioBlob = null, aufnahmeStart = null, timerInterval = null;
 let aufgabeId = null;
+let aufnahmeMimeType = 'audio/webm';  // wird dynamisch gesetzt
+
+// Bestes unterstütztes Format ermitteln (iOS Safari: mp4, andere: webm)
+function getBestMimeType() {
+  const typen = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+  ];
+  for (const t of typen) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';  // Browser-Standard
+}
+
+function getDateiendung(mimeType) {
+  if (mimeType.includes('mp4')) return '.mp4';
+  if (mimeType.includes('ogg')) return '.ogg';
+  return '.webm';
+}
 
 async function ladeAufgabe() {
   try {
     const res = await fetch(`/api/m4/${token}/text`);
     const data = await res.json();
     aufgabeId = data.niveau || 'B1';
-    // Saetze zusammenfügen oder ersten Satz anzeigen
     const saetze = data.saetze || [];
     document.getElementById('vorlesetext').textContent = saetze.join(' ');  
     document.getElementById('lade-bereich').classList.add('hidden');
@@ -94,11 +115,22 @@ async function toggleAufnahme() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+    // Bestes Format wählen
+    aufnahmeMimeType = getBestMimeType();
+    const options = aufnahmeMimeType ? { mimeType: aufnahmeMimeType } : {};
+    mediaRecorder = new MediaRecorder(stream, options);
+    // Tatsächlich verwendetes Format merken (kann vom Browser überschrieben werden)
+    aufnahmeMimeType = mediaRecorder.mimeType || aufnahmeMimeType || 'audio/webm';
+
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
     mediaRecorder.onstop = () => {
-      audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-      document.getElementById('audio-player').src = URL.createObjectURL(audioBlob);
+      audioBlob = new Blob(audioChunks, { type: aufnahmeMimeType });
+      const url = URL.createObjectURL(audioBlob);
+      const player = document.getElementById('audio-player');
+      player.src = url;
+      // Für Safari: explizit type setzen
+      player.type = aufnahmeMimeType;
       document.getElementById('recorder-container').classList.remove('recording');
       document.getElementById('recorder-btn').className = 'recorder-btn done';
       document.getElementById('recorder-btn').textContent = '✓';
@@ -122,10 +154,11 @@ async function toggleAufnahme() {
       document.getElementById('timer').textContent = `${Math.floor(sek/60)}:${(sek%60).toString().padStart(2,'0')}`;
       if (sek >= 300) stoppeAufnahme();
     }, 500);
-  } catch (e) { alert('Mikrofon-Zugriff verweigert.'); }
+  } catch (e) { alert('Mikrofon-Zugriff verweigert. Bitte erlaube den Zugriff auf das Mikrofon in den Einstellungen.'); }
 }
 
 function stoppeAufnahme() { if (mediaRecorder?.state === 'recording') mediaRecorder.stop(); }
+
 function neueAufnahme() {
   audioBlob = null;
   document.getElementById('audio-preview').classList.add('hidden');
@@ -138,19 +171,31 @@ function neueAufnahme() {
 async function sendeAudio() {
   if (!audioBlob) return;
   document.getElementById('analyse-overlay').classList.remove('hidden');
+
+  // Dateiname mit korrekter Endung
+  const endung = getDateiendung(aufnahmeMimeType);
+  const dateiname = `vorlesen${endung}`;
+
   const formData = new FormData();
-  formData.append('audio', audioBlob, 'vorlesen.webm');
+  formData.append('audio', audioBlob, dateiname);
   formData.append('aufgabe_id', aufgabeId || '');
+  formData.append('mime_type', aufnahmeMimeType);
+
   try {
-    // Erst hochladen, dann analysieren
     const uploadRes = await fetch(`/api/m4/${token}/upload`, { method: 'POST', body: formData });
-    if (!uploadRes.ok) throw new Error('Upload fehlgeschlagen');
+    if (!uploadRes.ok) {
+      const err = await uploadRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Upload fehlgeschlagen');
+    }
     const analyseRes = await fetch(`/api/m4/${token}/analysiere`, { method: 'POST' });
-    if (!analyseRes.ok) throw new Error('Analyse fehlgeschlagen');
+    if (!analyseRes.ok) {
+      const err = await analyseRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Analyse fehlgeschlagen');
+    }
     window.location.href = await naechstesModul() || `/ergebnis/${token}`;
   } catch (e) {
     document.getElementById('analyse-overlay').classList.add('hidden');
-    alert('Analysefehler. Bitte versuche es erneut.');
+    alert(`Fehler: ${e.message}\n\nBitte versuche es erneut.`);
   }
 }
 
