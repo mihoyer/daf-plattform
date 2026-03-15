@@ -155,38 +155,51 @@ Antworte ausschließlich mit diesem JSON-Objekt:
 korrekt ist der 0-basierte Index der richtigen Antwort in optionen[].
 Beispiel: Wenn optionen[2] korrekt ist, dann korrekt=2 und korrekte_antwort_text=optionen[2]."""
 
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.95,
-            max_tokens=400,
-        )
-        data = json.loads(response.choices[0].message.content)
-        # Sicherstellen dass alle Pflichtfelder vorhanden sind
-        if all(k in data for k in ("frage", "optionen", "korrekt")):
+    for versuch in range(3):  # Bis zu 3 Versuche
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4.1",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.95 if versuch == 0 else 0.7,
+                max_tokens=500,
+            )
+            data = json.loads(response.choices[0].message.content)
+
+            if not all(k in data for k in ("frage", "optionen", "korrekt")):
+                continue
+
             data["id"] = item_id
             data["niveau"] = niveau
             optionen = data.get("optionen", [])
             korrekt_idx = data.get("korrekt", 0)
             korrekte_antwort_text = data.get("korrekte_antwort_text", "")
-            # Selbstvalidierung: korrekte_antwort_text muss mit optionen[korrekt] übereinstimmen
+
+            # Stufe 1: Index-Text-Konsistenz prüfen
             if korrekte_antwort_text and 0 <= korrekt_idx < len(optionen):
                 if optionen[korrekt_idx].strip() != korrekte_antwort_text.strip():
-                    # GPT hat sich selbst widersprochen – korrekte_antwort_text als Wahrheit nehmen
                     try:
                         echter_idx = next(
                             i for i, opt in enumerate(optionen)
                             if opt.strip() == korrekte_antwort_text.strip()
                         )
                         data["korrekt"] = echter_idx
-                        print(f"[M1] Selbstkorrektur: korrekt {korrekt_idx}→{echter_idx} ('{korrekte_antwort_text}')")
+                        korrekt_idx = echter_idx
+                        print(f"[M1] Index-Korrektur: korrekt→{echter_idx} ('{korrekte_antwort_text}')")
                     except StopIteration:
-                        pass  # Text nicht gefunden, Index beibehalten
-            return _mische_optionen(data)
-    except Exception as e:
-        print(f"[M1] Fragen-Generierung fehlgeschlagen (Niveau {niveau}): {e}")
+                        pass
+
+            # Stufe 2: Unabhängige grammatische Validierung durch zweiten GPT-Aufruf
+            validiert = await _validiere_frage(data)
+            if validiert is None:
+                # Validierung fehlgeschlagen → nächster Versuch
+                print(f"[M1] Validierung fehlgeschlagen (Versuch {versuch+1}), neu generieren...")
+                continue
+
+            return _mische_optionen(validiert)
+
+        except Exception as e:
+            print(f"[M1] Fragen-Generierung Versuch {versuch+1} fehlgeschlagen: {e}")
 
     # Fallback: eine zufällige Frage aus dem Fallback-Pool
     return _fallback_frage(niveau, item_id)
@@ -356,6 +369,95 @@ async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
 
 
 # ── Hilfsfunktionen ───────────────────────────────────────────────────────────
+
+async def _validiere_frage(item: dict) -> Optional[dict]:
+    """
+    Zweiter unabhängiger GPT-Aufruf zur grammatischen Validierung.
+    Gibt das korrigierte Item zurück, oder None wenn die Frage unbrauchbar ist.
+    """
+    frage = item.get("frage", "")
+    optionen = item.get("optionen", [])
+    korrekt_idx = item.get("korrekt", 0)
+    niveau = item.get("niveau", "B1")
+
+    if not frage or not optionen or korrekt_idx >= len(optionen):
+        return None
+
+    optionen_text = "\n".join(f"{i}. {opt}" for i, opt in enumerate(optionen))
+    korrekte_option = optionen[korrekt_idx]
+
+    val_prompt = f"""Du bist ein Deutschlehrer und Grammatikexperte. Prüfe diese DaF-Aufgabe auf Korrektheit.
+
+Frage: {frage}
+Optionen:
+{optionen_text}
+Als korrekt markiert: {korrekt_idx}. "{korrekte_option}"
+Niveau: {niveau}
+
+Prüfe:
+1. Ist "{korrekte_option}" grammatisch und semantisch die EINZIG richtige Antwort?
+2. Sind die anderen Optionen wirklich falsch?
+3. Ist die Frage selbst grammatisch korrekt?
+
+Antworte mit JSON:
+{{
+  "korrekt": true/false,  // true wenn die markierte Antwort stimmt
+  "richtiger_index": {korrekt_idx},  // korrekter Index (kann abweichen wenn falsch markiert)
+  "richtige_antwort": "{korrekte_option}",  // die tatsächlich korrekte Option
+  "erklaerung": "Kurze Begründung",
+  "frage_korrekt": true/false  // false wenn die Frage selbst fehlerhaft ist
+}}"""
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[{"role": "user", "content": val_prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.1,  # Niedrig für konsistente Validierung
+            max_tokens=300,
+        )
+        val = json.loads(response.choices[0].message.content)
+
+        # Frage selbst fehlerhaft → verwerfen
+        if not val.get("frage_korrekt", True):
+            print(f"[M1] Frage verworfen (fehlerhaft): {frage[:60]}")
+            return None
+
+        # Falscher Index → korrigieren
+        if not val.get("korrekt", True):
+            richtiger_idx = val.get("richtiger_index", korrekt_idx)
+            richtige_antwort = val.get("richtige_antwort", "")
+            # Index aus Text ableiten falls möglich
+            if richtige_antwort:
+                try:
+                    richtiger_idx = next(
+                        i for i, opt in enumerate(optionen)
+                        if opt.strip() == richtige_antwort.strip()
+                    )
+                except StopIteration:
+                    pass
+            if 0 <= richtiger_idx < len(optionen):
+                print(f"[M1] Validierung korrigiert: {korrekt_idx}→{richtiger_idx} ('{optionen[richtiger_idx]}')")
+                item = dict(item)
+                item["korrekt"] = richtiger_idx
+                item["erklaerung"] = val.get("erklaerung", item.get("erklaerung", ""))
+            else:
+                # Kein gültiger Index gefunden → verwerfen
+                print(f"[M1] Frage verworfen (kein gültiger korrekt-Index): {frage[:60]}")
+                return None
+        else:
+            # Validierung bestätigt – Erklärung ggf. verbessern
+            if val.get("erklaerung"):
+                item = dict(item)
+                item["erklaerung"] = val["erklaerung"]
+
+        return item
+
+    except Exception as e:
+        print(f"[M1] Validierungs-Aufruf fehlgeschlagen: {e}")
+        # Bei Validierungsfehler: Item trotzdem zurückgeben (besser als Fallback)
+        return item
+
 
 def _mische_optionen(item: dict) -> dict:
     """Mischt die Antwortoptionen zufällig und passt den korrekt-Index an."""
