@@ -6,8 +6,15 @@ Ablauf:
 2. naechste()     → nach jeder Antwort Niveau neu schätzen, nächste Frage generieren
 3. werte_aus()    → Endauswertung mit GPT-Analyse
 
-Jede Frage wird frisch von GPT generiert (zufälliges Thema + Grammatikfokus).
+Jede Frage wird frisch von GPT generiert (zufälliger Grammatikfokus).
 Kein Cache, keine Wiederholungen.
+
+Verbesserungen v2:
+- Authentizitätsprinzip: Sätze klingen wie aus echten Texten/Gesprächen
+- Niedrigere Temperature (0.65) für präzisere grammatische Ausgaben
+- Niveau-spezifische Verbotslisten gegen konstruierte Sätze
+- Für C1/C2: kein zufälliges Thema mehr, nur Grammatikfokus
+- Fokuspool nach Niveau gefiltert (keine C1-Konstruktionen auf A2)
 """
 import json
 import random
@@ -24,38 +31,93 @@ client = AsyncOpenAI(api_key=settings.openai_api_key)
 
 NIVEAUS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
-THEMEN = [
+# Themen nur für A1–B2 (niedrige Niveaus brauchen Alltagskontext)
+THEMEN_NIEDRIG = [
     "Alltag und Familie", "Arbeit und Beruf", "Reisen und Urlaub",
-    "Gesundheit und Sport", "Umwelt und Natur", "Technologie und Medien",
-    "Essen und Kochen", "Wohnen und Stadt", "Bildung und Schule",
-    "Freizeit und Hobbys", "Einkaufen und Konsum", "Kultur und Gesellschaft",
-    "Verkehr und Mobilität", "Politik und Gesellschaft", "Wissenschaft und Forschung",
+    "Gesundheit und Arzt", "Essen und Kochen", "Wohnen und Umzug",
+    "Einkaufen", "Freizeit und Hobbys", "Schule und Studium",
+    "Öffentliche Verkehrsmittel", "Wetter", "Freunde und Bekannte",
 ]
 
-GRAMMATIK_FOKUS = [
-    "Verbkonjugation und Tempus (Präsens, Perfekt, Präteritum)",
-    "Kasus (Nominativ, Akkusativ, Dativ, Genitiv) und Artikel",
-    "Präpositionen mit Kasus",
-    "Modalverben und Infinitivkonstruktionen",
-    "Nebensätze und Konjunktionen (weil, dass, obwohl, wenn...)",
-    "Adjektivdeklination und Komparation",
-    "Passiv und Konjunktiv II",
-    "Wortschatz und Kollokationen",
-    "Trennbare und untrennbare Verben",
-    "Relativsätze und Relativpronomen",
-]
-
-NIVEAU_BESCHREIBUNGEN = {
-    "A1": "Sehr einfach: sein/haben, Grundwortschatz, einfachste Sätze",
-    "A2": "Einfach: Präsens aller Verben, bestimmte/unbestimmte Artikel, einfache Präpositionen",
-    "B1": "Mittel: Perfekt, Modalverben, Nebensätze, alle Kasus, erweiterter Wortschatz",
-    "B2": "Fortgeschritten: Konjunktiv II, Passiv, komplexe Satzstrukturen, idiomatischer Ausdruck",
-    "C1": "Sehr fortgeschritten: stilistische Feinheiten, seltene Konstruktionen, Fachvokabular",
-    "C2": "Mastery: Nuancen, literarische Sprache, höchste sprachliche Präzision",
+# Grammatikfokus nach Niveau – nur passende Strukturen pro Stufe
+GRAMMATIK_NACH_NIVEAU = {
+    "A1": [
+        "sein/haben im Präsens (ich/du/er/wir/ihr/sie)",
+        "Grundwortschatz: Nomen mit bestimmtem Artikel (der/die/das)",
+        "Personalpronomen und einfache Verben im Präsens",
+        "Zahlen, Farben, einfache Adjektive",
+    ],
+    "A2": [
+        "Perfekt mit haben/sein (regelmäßige Verben)",
+        "Perfekt mit haben/sein (unregelmäßige Verben)",
+        "Akkusativ mit bestimmtem/unbestimmtem Artikel",
+        "Dativ nach Präpositionen (in/an/auf/bei/mit/nach/von/zu)",
+        "Modalverben im Präsens (können/müssen/wollen/dürfen/sollen)",
+        "Trennbare Verben (aufmachen, anrufen, einladen…)",
+        "Komparation: Komparativ und Superlativ",
+    ],
+    "B1": [
+        "Kausalsätze mit weil/da (Verbstellung am Ende)",
+        "Finalsätze mit damit/um…zu",
+        "Konzessivsätze mit obwohl",
+        "Temporalsätze mit als/wenn/während/nachdem",
+        "Konjunktiv II: würde + Infinitiv (höfliche Bitten, Wünsche)",
+        "Passiv Präsens (wird gemacht)",
+        "Genitiv: des/der/eines/einer",
+        "Relativsätze im Nominativ und Akkusativ",
+        "Indirekte Rede mit dass",
+    ],
+    "B2": [
+        "Konjunktiv II von starken Verben (wäre, hätte, käme, ginge…)",
+        "Passiv Perfekt und Passiv Präteritum",
+        "Relativsätze im Dativ und Genitiv",
+        "Präpositionaladverbien (darauf, damit, worüber…)",
+        "Erweiterte Partizipialkonstruktionen",
+        "Konzessive Konstruktionen (trotzdem/dennoch/obwohl)",
+        "Idiomatische Ausdrücke und Kollokationen",
+        "Nominalisierung (das Lesen, die Entscheidung…)",
+    ],
+    "C1": [
+        "Konzessiver Konjunktiv (wenngleich, wiewohl, auch wenn)",
+        "Infinitivkonstruktionen mit zu (ohne es zu merken, anstatt zu…)",
+        "Stilistische Variation: Nominalstil vs. Verbalstil",
+        "Seltene Präpositionen mit Genitiv (anlässlich, infolge, hinsichtlich)",
+        "Subjunktoren: sofern, insofern, insoweit, soweit",
+        "Doppelkonjunktionen: sowohl…als auch, weder…noch, je…desto",
+        "Fachvokabular und Register (formell vs. informell)",
+    ],
+    "C2": [
+        "Konzessiver Konjunktiv mit mochte/möge (mochte er auch…)",
+        "Archaische/literarische Konstruktionen (er sei, man nehme…)",
+        "Nuancen zwischen bedeutungsähnlichen Präpositionen",
+        "Stilistik: Ellipsen, Inversionen, Parenthesen",
+        "Feine semantische Unterschiede (obwohl vs. obgleich vs. wenngleich)",
+        "Komplexe Nominalphrasen mit mehreren Attributen",
+    ],
 }
 
 # Einstiegs-Niveaus: breite Streuung für schnelle Einschätzung
 EINSTIEGS_NIVEAUS = ["A2", "B1", "B2"]
+
+# Niveau-spezifische Verbotslisten für den Prompt
+VERBOTE_NACH_NIVEAU = {
+    "A1": "Keine Nebensätze. Keine Perfekt-Formen. Keine Kasus-Konstruktionen.",
+    "A2": "Keine Nebensätze. Keine Konjunktiv-Formen. Maximal ein grammatischer Fokus pro Satz.",
+    "B1": "Keine Doppel-Nebensätze. Kein Konjunktiv II von starken Verben. Kein Passiv Perfekt.",
+    "B2": "Keine literarischen Konstruktionen. Kein konzessiver Konjunktiv mit 'mochte'. Sätze bleiben verständlich.",
+    "C1": "Keine archaischen Formen. Kein 'er sei' / 'man nehme'. Sätze müssen im modernen Schriftdeutsch vorkommen.",
+    "C2": "Nur Konstruktionen, die in anspruchsvollen Sachtexten oder Literatur tatsächlich vorkommen.",
+}
+
+# Authentizitäts-Kontext nach Niveau
+KONTEXT_NACH_NIVEAU = {
+    "A1": "einfaches Alltagsgespräch (Begrüßung, Vorstellung, Einkauf)",
+    "A2": "kurze Alltagssituation (Gespräch, SMS, einfache E-Mail)",
+    "B1": "Alltagstext (Zeitungsnotiz, E-Mail, Gespräch unter Kollegen)",
+    "B2": "Zeitungsartikel, Sachtext, formelles Schreiben oder Interview",
+    "C1": "Qualitätsjournalismus, Sachbuch, Fachtext oder Essay",
+    "C2": "anspruchsvoller Sachtext, wissenschaftlicher Artikel oder Literatur",
+}
 
 
 # ── Niveau-Schätzung (IRT-vereinfacht) ───────────────────────────────────────
@@ -64,9 +126,6 @@ def schaetze_niveau(antworten_verlauf: list[dict]) -> str:
     """
     Schätzt das aktuelle Niveau basierend auf dem bisherigen Antwortverlauf.
     antworten_verlauf: [{"niveau": "B1", "korrekt": True}, ...]
-    
-    Algorithmus: Gewichteter Durchschnitt der Niveau-Indizes,
-    richtige Antworten ziehen nach oben, falsche nach unten.
     """
     if not antworten_verlauf:
         return "B1"
@@ -75,17 +134,14 @@ def schaetze_niveau(antworten_verlauf: list[dict]) -> str:
     gewicht_gesamt = 0.0
 
     for i, eintrag in enumerate(antworten_verlauf):
-        # Neuere Antworten stärker gewichten
         gewicht = 1.0 + i * 0.3
         niveau_idx = NIVEAUS.index(eintrag["niveau"])
-        
+
         if eintrag["korrekt"]:
-            # Richtig → Niveau-Index + 1 (tendiert nach oben)
             ziel_idx = min(niveau_idx + 1, len(NIVEAUS) - 1)
         else:
-            # Falsch → Niveau-Index - 1 (tendiert nach unten)
             ziel_idx = max(niveau_idx - 1, 0)
-        
+
         niveau_punkte += ziel_idx * gewicht
         gewicht_gesamt += gewicht
 
@@ -104,101 +160,88 @@ async def generiere_eine_frage(
 ) -> dict:
     """
     Generiert genau eine MC-Frage für das angegebene Niveau.
-    Zufälliges Thema + Grammatikfokus für maximale Variation.
+    Authentizitätsprinzip: Satz klingt wie aus einem echten Text.
     """
-    thema = random.choice(THEMEN)
-    fokus = random.choice(GRAMMATIK_FOKUS)
+    # Grammatikfokus aus dem niveau-spezifischen Pool
+    fokus_pool = GRAMMATIK_NACH_NIVEAU.get(niveau, GRAMMATIK_NACH_NIVEAU["B1"])
+    fokus = random.choice(fokus_pool)
+
+    # Thema nur für A1–B2 (höhere Niveaus: Fokus reicht als Kontext)
+    if niveau in ("A1", "A2", "B1", "B2"):
+        thema = random.choice(THEMEN_NIEDRIG)
+        thema_zeile = f"THEMA: {thema} (der Satz soll aus diesem Alltagsbereich stammen)"
+    else:
+        thema_zeile = "THEMA: frei wählbar – wähle ein Thema, das zum Grammatikfokus passt"
+
+    kontext = KONTEXT_NACH_NIVEAU.get(niveau, "Alltagstext")
+    verbote = VERBOTE_NACH_NIVEAU.get(niveau, "")
 
     hilfs_hinweis = ""
     if hilfssprache != "de":
         sprach_namen = {
             "en": "English", "tr": "Türkçe", "ar": "العربية",
             "uk": "Українська", "ru": "Русский", "fr": "Français",
-            "it": "Italiano", "es": "Español"
+            "it": "Italiano", "es": "Español", "fa": "فارسی",
+            "zh": "中文", "pl": "Polski",
         }
         sprach_name = sprach_namen.get(hilfssprache, hilfssprache)
         hilfs_hinweis = f'\nFüge ein Feld "hinweis_{hilfssprache}" mit einer kurzen Aufgabenerklärung auf {sprach_name} hinzu.'
 
     vermeidungs_hinweis = ""
     if bereits_verwendet:
-        beispiele = ", ".join(bereits_verwendet[-5:])
-        vermeidungs_hinweis = f'\nVermeide Fragen die diesen ähneln: {beispiele}'
+        beispiele = " | ".join(bereits_verwendet[-4:])
+        vermeidungs_hinweis = f'\nVERMEIDE Fragen, die diesen ähneln: {beispiele}'
 
-    # Niveau-spezifische Beispiele und Regeln
-    niveau_beispiele = {
-        "A1": {
-            "fokus": "sein/haben, ich/du/er-Formen, Grundwortschatz",
-            "beispiel": 'Frage: "Ich ___ Student." | Optionen: ["bin", "bist", "ist", "sind"] | korrekt: 0',
-            "regel": "Sehr kurze, einfache Sätze. Nur Präsens. Keine Nebensätze."
-        },
-        "A2": {
-            "fokus": "Perfekt, Artikel, einfache Präpositionen, Modalverben",
-            "beispiel": 'Frage: "Gestern ___ ich ins Kino gegangen." | Optionen: ["bin", "habe", "war", "wurde"] | korrekt: 0',
-            "regel": "Einfache Sätze, ein grammatischer Fokus. Keine verschachtelten Strukturen."
-        },
-        "B1": {
-            "fokus": "Nebensätze (weil/dass/wenn), alle Kasus, Konjunktiv II einfach",
-            "beispiel": 'Frage: "Er kommt nicht, ___ er krank ist." | Optionen: ["weil", "dass", "ob", "wenn"] | korrekt: 0',
-            "regel": "Klare Lucksätze. Ein Nebensatz maximal. Eindeutige richtige Antwort."
-        },
-        "B2": {
-            "fokus": "Konjunktiv II, Passiv, Relativsätze, idiomatischer Ausdruck",
-            "beispiel": 'Frage: "Das Buch ___ von vielen Schülern gelesen." | Optionen: ["wird", "ist", "hat", "kann"] | korrekt: 0',
-            "regel": "Klare Satzstruktur. Keine doppelten Konjunktiv-Konstruktionen."
-        },
-        "C1": {
-            "fokus": "Stilistik, seltene Konstruktionen, Fachvokabular, Präpositionalphrasen",
-            "beispiel": 'Frage: "___ seiner Bemühungen scheiterte das Projekt." | Optionen: ["Trotz", "Wegen", "Durch", "Gegen"] | korrekt: 0',
-            "regel": "Anspruchsvoll aber eindeutig. Keine mehrdeutigen Konstruktionen."
-        },
-        "C2": {
-            "fokus": "Nuancen, konzessive Konjunktiv-Konstruktionen, literarische Sprache",
-            "beispiel": 'Frage: "Er bestand darauf, ___ die Entscheidung selbst zu treffen." | Optionen: ["dass", "ob", "wenn", "weil"] | korrekt: 0',
-            "regel": "Höchste Präzision. Nur wenn die richtige Antwort absolut eindeutig ist."
-        },
-    }
-    nb = niveau_beispiele.get(niveau, niveau_beispiele["B1"])
+    prompt = f"""Du bist DaF-Prüfungsautor mit Erfahrung beim Goethe-Institut. Erstelle EINE Multiple-Choice-Lückensatz-Aufgabe.
 
-    prompt = f"""Du bist DaF-Prüfungsautor (Goethe-Institut Niveau). Erstelle EINE Multiple-Choice-Frage.
-
-NIVEAU: {niveau}
-THEMA: {thema}
+NIVEAU: {niveau} (CEFR)
 GRAMMATIK-FOKUS: {fokus}
+{thema_zeile}
+KONTEXT: Der Satz soll klingen wie aus einem echten {kontext} – nicht wie ein konstruierter Lehrbuchsatz.
 
-REGELN FÜR DIESES NIVEAU:
-- Grammatischer Fokus: {nb['fokus']}
-- Regel: {nb['regel']}
-- Beispiel für gute Frage: {nb['beispiel']}
+VERBOTE FÜR DIESES NIVEAU:
+{verbote}
 {vermeidungs_hinweis}
+
+QUALITÄTSREGELN (alle einhalten):
+1. Der Satz mit der richtigen Antwort muss so klingen, wie ihn ein Muttersprachler tatsächlich schreiben würde.
+2. Genau eine Lücke (_____), genau 4 Optionen, genau eine richtige Antwort.
+3. Die 3 falschen Optionen sind typische Fehler auf diesem Niveau – nicht zufällige Wörter.
+4. Jede Option ist kurz (1–4 Wörter). Keine Optionen, die sich nur durch Groß-/Kleinschreibung unterscheiden.
+5. Die richtige Antwort ist grammatisch und semantisch EINDEUTIG korrekt – keine Grenzfälle.
+6. Kein Satz, der mehrere Deutungen zulässt.
 {hilfs_hinweis}
 
-PFLICHTREGELN (IMMER einhalten):
-1. Einfacher, natürlicher Lucksätz mit _____ als Platzhalter
-2. Genau 4 kurze Optionen (1-4 Wörter je Option)
-3. Genau EINE richtige Antwort - die anderen 3 sind eindeutig falsch
-4. Distraktoren = typische Fehler auf diesem Niveau (nicht zufällige Wörter)
-5. Der vollständige Satz mit der richtigen Option muss grammatisch einwandfrei sein
-6. korrekte_antwort_text MUSS exakt mit optionen[korrekt] übereinstimmen
-
-Antworte NUR mit diesem JSON:
+Antworte NUR mit diesem JSON (kein Text davor oder danach):
 {{
   "id": {item_id},
-  "frage": "Satz mit _____ als Lucke",
+  "frage": "Vollständiger Satz mit _____ als Lücke",
   "optionen": ["Option A", "Option B", "Option C", "Option D"],
   "korrekt": 0,
   "korrekte_antwort_text": "exakt derselbe Text wie optionen[korrekt]",
-  "erklaerung": "Warum diese Option korrekt ist (1-2 Sätze)",
+  "erklaerung": "Warum diese Option korrekt ist (1–2 präzise Sätze, Regel benennen)",
   "niveau": "{niveau}",
-  "thema": "{thema}"
+  "thema": "Thema des Satzes"
 }}"""
 
-    for versuch in range(3):  # Bis zu 3 Versuche
+    for versuch in range(3):
         try:
             response = await client.chat.completions.create(
                 model="gpt-4.1",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Du bist ein erfahrener DaF-Prüfungsautor. "
+                            "Du erstellst ausschließlich grammatisch einwandfreie, "
+                            "natürlich klingende Lückensatz-Aufgaben. "
+                            "Konstruierte oder unnatürliche Sätze lehnst du ab."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
                 response_format={"type": "json_object"},
-                temperature=0.95 if versuch == 0 else 0.7,
+                temperature=0.65,  # Präzision vor Kreativität
                 max_tokens=500,
             )
             data = json.loads(response.choices[0].message.content)
@@ -212,7 +255,7 @@ Antworte NUR mit diesem JSON:
             korrekt_idx = data.get("korrekt", 0)
             korrekte_antwort_text = data.get("korrekte_antwort_text", "")
 
-            # Stufe 1: Index-Text-Konsistenz prüfen
+            # Index-Text-Konsistenz prüfen und ggf. korrigieren
             if korrekte_antwort_text and 0 <= korrekt_idx < len(optionen):
                 if optionen[korrekt_idx].strip() != korrekte_antwort_text.strip():
                     try:
@@ -226,10 +269,9 @@ Antworte NUR mit diesem JSON:
                     except StopIteration:
                         pass
 
-            # Stufe 2: Unabhängige grammatische Validierung durch zweiten GPT-Aufruf
+            # Grammatische Validierung
             validiert = await _validiere_frage(data)
             if validiert is None:
-                # Validierung fehlgeschlagen → nächster Versuch
                 print(f"[M1] Validierung fehlgeschlagen (Versuch {versuch+1}), neu generieren...")
                 continue
 
@@ -238,14 +280,12 @@ Antworte NUR mit diesem JSON:
         except Exception as e:
             print(f"[M1] Fragen-Generierung Versuch {versuch+1} fehlgeschlagen: {e}")
 
-    # Fallback: eine zufällige Frage aus dem Fallback-Pool
     return _fallback_frage(niveau, item_id)
 
 
 async def generiere_einstiegsfragen(hilfssprache: str = "de") -> list[dict]:
     """
     Generiert 3 Einstiegsfragen mit breiter Niveau-Streuung (A2, B1, B2).
-    Reihenfolge wird gemischt damit das Niveau nicht vorhersehbar ist.
     """
     import asyncio
     einstiegs_niveaus = EINSTIEGS_NIVEAUS.copy()
@@ -262,10 +302,7 @@ async def generiere_einstiegsfragen(hilfssprache: str = "de") -> list[dict]:
 # ── Öffentliche Service-Funktionen ────────────────────────────────────────────
 
 async def starte_adaptiven_test(hilfssprache: str = "de") -> dict:
-    """
-    Startet den adaptiven Test.
-    Gibt 3 Einstiegsfragen zurück + initialen Zustand.
-    """
+    """Startet den adaptiven Test. Gibt 3 Einstiegsfragen zurück."""
     fragen = await generiere_einstiegsfragen(hilfssprache)
     return {
         "fragen": fragen,
@@ -283,30 +320,21 @@ async def naechste_frage(
     gewaehlt: int,
     hilfssprache: str = "de",
 ) -> dict:
-    """
-    Verarbeitet eine Antwort und generiert die nächste adaptive Frage.
-    
-    zustand: {antworten_verlauf, naechste_id, bereits_gefragt_fragen}
-    item_id: ID der beantworteten Frage
-    gewaehlt: Index der gewählten Option
-    """
+    """Verarbeitet eine Antwort und generiert die nächste adaptive Frage."""
     antworten_verlauf = zustand.get("antworten_verlauf", [])
     naechste_id = zustand.get("naechste_id", 4)
-    bereits_gefragt = zustand.get("bereits_gefragt_fragen", [])
     alle_fragen = zustand.get("alle_fragen", [])
 
-    # Aktuelle Frage aus dem Verlauf finden
     aktuelle_frage = next(
         (f for f in alle_fragen if f["id"] == item_id), None
     )
-    
+
     korrekt = False
     fragen_niveau = "B1"
     if aktuelle_frage:
         korrekt = gewaehlt == aktuelle_frage.get("korrekt", -1)
         fragen_niveau = aktuelle_frage.get("niveau", "B1")
 
-    # Antwortverlauf aktualisieren
     antworten_verlauf.append({
         "item_id": item_id,
         "niveau": fragen_niveau,
@@ -314,13 +342,9 @@ async def naechste_frage(
         "gewaehlt": gewaehlt,
     })
 
-    # Neues Niveau schätzen
     neues_niveau = schaetze_niveau(antworten_verlauf)
-
-    # Bereits verwendete Fragen-Texte für Vermeidung
     bereits_verwendet = [f.get("frage", "") for f in alle_fragen]
 
-    # Nächste Frage generieren
     neue_frage = await generiere_eine_frage(
         neues_niveau, hilfssprache, bereits_verwendet, naechste_id
     )
@@ -335,10 +359,7 @@ async def naechste_frage(
 
 
 async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
-    """
-    Endauswertung: berechnet Score, CEFR und detaillierte Analyse.
-    antworten: {"1": 2, "2": 0, ...} (item_id → gewählter Index)
-    """
+    """Endauswertung: berechnet Score, CEFR und detaillierte Analyse."""
     korrekt_count = 0
     total = len(alle_fragen)
     details = []
@@ -361,7 +382,9 @@ async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
             "frage": frage["frage"],
             "optionen": frage.get("optionen", []),
             "gewaehlt": gewaehlt,
+            "gewaehlt_text": frage.get("optionen", [])[gewaehlt] if 0 <= gewaehlt < len(frage.get("optionen", [])) else "–",
             "korrekt": frage.get("korrekt"),
+            "korrekt_text": frage.get("optionen", [])[frage.get("korrekt", 0)] if frage.get("korrekt") is not None else "–",
             "ist_korrekt": ist_korrekt,
             "erklaerung": frage.get("erklaerung", ""),
             "niveau": frage.get("niveau", "B1"),
@@ -371,10 +394,8 @@ async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
     prozent = (korrekt_count / total * 100) if total > 0 else 0
     score = round(prozent, 1)
 
-    # CEFR aus adaptivem Verlauf + Prozent kombinieren
     adaptives_niveau = schaetze_niveau(antworten_verlauf)
-    
-    # Prozent-basiertes CEFR als Kontrolle
+
     if prozent >= 90:
         prozent_cefr = "C1"
     elif prozent >= 75:
@@ -386,7 +407,6 @@ async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
     else:
         prozent_cefr = "A1"
 
-    # Kombiniertes CEFR: Durchschnitt aus adaptivem und prozentbasiertem Niveau
     adaptiv_idx = NIVEAUS.index(adaptives_niveau)
     prozent_idx = NIVEAUS.index(prozent_cefr)
     final_idx = round((adaptiv_idx + prozent_idx) / 2)
@@ -409,8 +429,8 @@ async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
 
 async def _validiere_frage(item: dict) -> Optional[dict]:
     """
-    Zweiter unabhängiger GPT-Aufruf zur grammatischen Validierung.
-    Gibt das korrigierte Item zurück, oder None wenn die Frage unbrauchbar ist.
+    Zweiter GPT-Aufruf zur grammatischen Validierung.
+    Prüft: Ist die markierte Antwort eindeutig korrekt? Klingt der Satz natürlich?
     """
     frage = item.get("frage", "")
     optionen = item.get("optionen", [])
@@ -423,48 +443,56 @@ async def _validiere_frage(item: dict) -> Optional[dict]:
     optionen_text = "\n".join(f"{i}. {opt}" for i, opt in enumerate(optionen))
     korrekte_option = optionen[korrekt_idx]
 
-    val_prompt = f"""Du bist ein Deutschlehrer und Grammatikexperte. Prüfe diese DaF-Aufgabe auf Korrektheit.
+    val_prompt = f"""Du bist Deutschlehrer und Grammatikexperte. Prüfe diese DaF-Aufgabe (Niveau {niveau}).
 
-Frage: {frage}
+Lückensatz: {frage}
 Optionen:
 {optionen_text}
 Als korrekt markiert: {korrekt_idx}. "{korrekte_option}"
-Niveau: {niveau}
 
-Prüfe:
+Beantworte drei Fragen:
 1. Ist "{korrekte_option}" grammatisch und semantisch die EINZIG richtige Antwort?
-2. Sind die anderen Optionen wirklich falsch?
-3. Ist die Frage selbst grammatisch korrekt?
+2. Klingt der vollständige Satz mit "{korrekte_option}" natürlich (wie ein Muttersprachler ihn schreiben würde)?
+3. Sind alle anderen Optionen eindeutig falsch?
 
 Antworte mit JSON:
 {{
-  "korrekt": true/false,  // true wenn die markierte Antwort stimmt
-  "richtiger_index": {korrekt_idx},  // korrekter Index (kann abweichen wenn falsch markiert)
-  "richtige_antwort": "{korrekte_option}",  // die tatsächlich korrekte Option
-  "erklaerung": "Kurze Begründung",
-  "frage_korrekt": true/false  // false wenn die Frage selbst fehlerhaft ist
+  "korrekt": true/false,
+  "natuerlich": true/false,
+  "richtiger_index": {korrekt_idx},
+  "richtige_antwort": "{korrekte_option}",
+  "erklaerung": "Kurze Begründung (Grammatikregel nennen)",
+  "frage_korrekt": true/false
 }}"""
 
     try:
         response = await client.chat.completions.create(
             model="gpt-4.1",
-            messages=[{"role": "user", "content": val_prompt}],
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Du bist ein strenger Grammatikprüfer. Du lehnst Aufgaben ab, die unnatürlich klingen oder mehrdeutig sind.",
+                },
+                {"role": "user", "content": val_prompt},
+            ],
             response_format={"type": "json_object"},
-            temperature=0.1,  # Niedrig für konsistente Validierung
+            temperature=0.1,
             max_tokens=300,
         )
         val = json.loads(response.choices[0].message.content)
 
-        # Frage selbst fehlerhaft → verwerfen
+        # Frage fehlerhaft oder unnatürlich → verwerfen
         if not val.get("frage_korrekt", True):
             print(f"[M1] Frage verworfen (fehlerhaft): {frage[:60]}")
+            return None
+        if not val.get("natuerlich", True):
+            print(f"[M1] Frage verworfen (unnatürlich): {frage[:60]}")
             return None
 
         # Falscher Index → korrigieren
         if not val.get("korrekt", True):
             richtiger_idx = val.get("richtiger_index", korrekt_idx)
             richtige_antwort = val.get("richtige_antwort", "")
-            # Index aus Text ableiten falls möglich
             if richtige_antwort:
                 try:
                     richtiger_idx = next(
@@ -479,11 +507,9 @@ Antworte mit JSON:
                 item["korrekt"] = richtiger_idx
                 item["erklaerung"] = val.get("erklaerung", item.get("erklaerung", ""))
             else:
-                # Kein gültiger Index gefunden → verwerfen
-                print(f"[M1] Frage verworfen (kein gültiger korrekt-Index): {frage[:60]}")
+                print(f"[M1] Frage verworfen (kein gültiger Index): {frage[:60]}")
                 return None
         else:
-            # Validierung bestätigt – Erklärung ggf. verbessern
             if val.get("erklaerung"):
                 item = dict(item)
                 item["erklaerung"] = val["erklaerung"]
@@ -492,8 +518,7 @@ Antworte mit JSON:
 
     except Exception as e:
         print(f"[M1] Validierungs-Aufruf fehlgeschlagen: {e}")
-        # Bei Validierungsfehler: Item trotzdem zurückgeben (besser als Fallback)
-        return item
+        return item  # Bei Fehler: Item trotzdem zurückgeben
 
 
 def _mische_optionen(item: dict) -> dict:
@@ -503,24 +528,43 @@ def _mische_optionen(item: dict) -> dict:
     korrekt_idx = item.get("korrekt", 0)
     if 0 <= korrekt_idx < len(optionen):
         korrekte_antwort = optionen[korrekt_idx]
-        indizes = list(range(len(optionen)))
-        random.shuffle(indizes)
-        item["optionen"] = [optionen[i] for i in indizes]
-        item["korrekt"] = item["optionen"].index(korrekte_antwort)
+        random.shuffle(optionen)
+        item["optionen"] = optionen
+        item["korrekt"] = optionen.index(korrekte_antwort)
+        item["korrekte_antwort_text"] = korrekte_antwort
     return item
 
 
 def _fallback_frage(niveau: str, item_id: int) -> dict:
-    """Notfall-Fallback falls GPT komplett ausfällt."""
+    """Notfall-Fallback – handverlesene, geprüfte Fragen pro Niveau."""
+    # Mehrere Fallbacks pro Niveau für etwas Variation
     fallbacks = {
-        "A1": {"frage": "Ich ___ Peter.", "optionen": ["heiße", "heißt", "heißen", "heiß"], "korrekt": 0, "erklaerung": "1. Person Singular: ich heiße"},
-        "A2": {"frage": "Gestern ___ ich ins Kino gegangen.", "optionen": ["bin", "habe", "war", "wurde"], "korrekt": 0, "erklaerung": "Perfekt mit 'sein' bei Bewegungsverben"},
-        "B1": {"frage": "Er sagte, ___ er morgen komme.", "optionen": ["dass", "das", "ob", "weil"], "korrekt": 0, "erklaerung": "Indirekter Satz mit 'dass'"},
-        "B2": {"frage": "Wenn ich mehr Zeit ___, würde ich reisen.", "optionen": ["hätte", "habe", "hatte", "haben"], "korrekt": 0, "erklaerung": "Konjunktiv II in Konditionalsätzen"},
-        "C1": {"frage": "Die Entscheidung, ___ er sich widersetzt hatte, wurde revidiert.", "optionen": ["der", "die", "das", "dem"], "korrekt": 0, "erklaerung": "Relativpronomen im Dativ nach 'widersetzen'"},
-        "C2": {"frage": "___ er auch noch so fleißig lernte, reichte es nicht.", "optionen": ["Mochte", "Möge", "Mag", "Möchte"], "korrekt": 0, "erklaerung": "Konzessiver Konjunktiv: 'mochte... auch'"},
+        "A1": [
+            {"frage": "Ich _____ aus Deutschland.", "optionen": ["komme", "kommst", "kommt", "kommen"], "korrekt": 0, "erklaerung": "1. Person Singular Präsens: ich komme."},
+            {"frage": "Das _____ mein Bruder.", "optionen": ["ist", "bin", "bist", "sind"], "korrekt": 0, "erklaerung": "3. Person Singular von 'sein': ist."},
+        ],
+        "A2": [
+            {"frage": "Gestern _____ ich ins Kino gegangen.", "optionen": ["bin", "habe", "war", "wurde"], "korrekt": 0, "erklaerung": "Perfekt mit 'sein' bei Bewegungsverben (gehen)."},
+            {"frage": "Kannst du _____ helfen?", "optionen": ["mir", "mich", "mein", "ich"], "korrekt": 0, "erklaerung": "Nach 'helfen' steht der Dativ: mir."},
+        ],
+        "B1": [
+            {"frage": "Er kommt nicht zur Party, _____ er krank ist.", "optionen": ["weil", "dass", "ob", "wenn"], "korrekt": 0, "erklaerung": "'weil' leitet einen Kausalsatz ein; das Verb steht am Ende."},
+            {"frage": "Sie hat versprochen, _____ sie pünktlich kommt.", "optionen": ["dass", "ob", "weil", "wenn"], "korrekt": 0, "erklaerung": "Nach 'versprechen' folgt ein dass-Satz."},
+        ],
+        "B2": [
+            {"frage": "Wenn ich mehr Zeit _____, würde ich öfter reisen.", "optionen": ["hätte", "habe", "hatte", "haben"], "korrekt": 0, "erklaerung": "Konjunktiv II im Konditionalsatz: hätte."},
+            {"frage": "Das Paket _____ gestern geliefert.", "optionen": ["wurde", "hat", "ist", "wird"], "korrekt": 0, "erklaerung": "Passiv Präteritum: wurde + Partizip II."},
+        ],
+        "C1": [
+            {"frage": "_____ seiner langjährigen Erfahrung wurde er für die Stelle ausgewählt.", "optionen": ["Aufgrund", "Wegen", "Durch", "Infolge"], "korrekt": 0, "erklaerung": "'aufgrund' + Genitiv drückt einen Grund aus; hier am natürlichsten."},
+            {"frage": "Das Projekt scheiterte, _____ alle Beteiligten ihr Bestes gegeben hatten.", "optionen": ["obwohl", "weil", "sodass", "damit"], "korrekt": 0, "erklaerung": "'obwohl' leitet einen konzessiven Nebensatz ein."},
+        ],
+        "C2": [
+            {"frage": "Er bestand darauf, die Angelegenheit _____ zu regeln.", "optionen": ["selbst", "selber", "allein", "eigenständig"], "korrekt": 0, "erklaerung": "Im formellen Schriftdeutsch ist 'selbst' die stilistisch präziseste Wahl."},
+        ],
     }
-    base = fallbacks.get(niveau, fallbacks["B1"]).copy()
+    pool = fallbacks.get(niveau, fallbacks["B1"])
+    base = random.choice(pool).copy()
     base["id"] = item_id
     base["niveau"] = niveau
     base["thema"] = "Grammatik"
@@ -531,8 +575,10 @@ def _analysiere_staerken(details: list[dict]) -> list[str]:
     """Leitet Stärken aus den korrekten Antworten ab."""
     korrekte_niveaus = [d["niveau"] for d in details if d["ist_korrekt"]]
     staerken = []
-    if "B2" in korrekte_niveaus or "C1" in korrekte_niveaus:
-        staerken.append("Beherrschung komplexer Grammatikstrukturen")
+    if "C1" in korrekte_niveaus or "C2" in korrekte_niveaus:
+        staerken.append("Beherrschung anspruchsvoller C1/C2-Strukturen")
+    if "B2" in korrekte_niveaus:
+        staerken.append("Sichere Anwendung komplexer B2-Grammatik")
     if korrekte_niveaus.count("B1") >= 2:
         staerken.append("Solide Grundgrammatik auf B1-Niveau")
     if korrekte_niveaus.count("A2") >= 1:
@@ -550,4 +596,6 @@ def _analysiere_schwaechen(details: list[dict]) -> list[str]:
         schwaechen.append("Mittelstufen-Grammatik (B1) ausbaufähig")
     if "B2" in falsche_niveaus:
         schwaechen.append("Komplexe Strukturen (B2) noch nicht gefestigt")
+    if "C1" in falsche_niveaus:
+        schwaechen.append("Anspruchsvolle C1-Konstruktionen noch unsicher")
     return schwaechen or ["Einzelne Lücken in spezifischen Strukturen"]
