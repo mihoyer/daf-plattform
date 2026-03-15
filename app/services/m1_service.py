@@ -124,7 +124,7 @@ async def generiere_eine_frage(
         beispiele = ", ".join(bereits_verwendet[-5:])
         vermeidungs_hinweis = f'\nVermeide Fragen die diesen ähneln: {beispiele}'
 
-    prompt = f"""Du bist ein DaF-Experte. Erstelle genau EINE Multiple-Choice-Frage für CEFR-Niveau {niveau}.
+    prompt = f"""Du bist ein DaF-Experte und Prüfungsautor. Erstelle genau EINE Multiple-Choice-Frage für CEFR-Niveau {niveau}.
 
 Thema: {thema}
 Grammatischer Schwerpunkt: {fokus}
@@ -132,24 +132,28 @@ Niveau {niveau}: {NIVEAU_BESCHREIBUNGEN[niveau]}
 {vermeidungs_hinweis}
 {hilfs_hinweis}
 
-Anforderungen:
+Strenge Anforderungen:
 - Authentischer, natürlicher Satz zum Thema "{thema}"
-- Genau 4 Antwortoptionen, genau eine korrekt
-- Distraktoren sind plausibel (typische Lernerfehler auf diesem Niveau)
-- Kurze, präzise grammatische Erklärung
+- Genau 4 Antwortoptionen, genau EINE davon ist grammatisch und inhaltlich korrekt
+- Die 3 Distraktoren sind FALSCH aber plausibel (typische Lernerfehler auf diesem Niveau)
+- WICHTIG: Prüfe vor der Ausgabe nochmals: Ist optionen[korrekt] wirklich die einzig richtige Antwort?
+- Stelle sicher dass der Satz mit der richtigen Option grammatisch und semantisch einwandfrei ist
+- Kurze, präzise grammatische Erklärung warum die richtige Antwort korrekt ist
 
 Antworte ausschließlich mit diesem JSON-Objekt:
 {{
   "id": {item_id},
-  "frage": "Lückensatz oder Frage auf Deutsch",
+  "frage": "Lückensatz mit _____ als Lücke oder konkrete Frage auf Deutsch",
   "optionen": ["Option A", "Option B", "Option C", "Option D"],
   "korrekt": 0,
-  "erklaerung": "Grammatische Erklärung",
+  "korrekte_antwort_text": "Die korrekte Option als Text (zur Selbstprüfung)",
+  "erklaerung": "Grammatische Erklärung warum diese Antwort korrekt ist",
   "niveau": "{niveau}",
   "thema": "{thema}"
 }}
 
-korrekt ist der 0-basierte Index der richtigen Antwort."""
+korrekt ist der 0-basierte Index der richtigen Antwort in optionen[].
+Beispiel: Wenn optionen[2] korrekt ist, dann korrekt=2 und korrekte_antwort_text=optionen[2]."""
 
     try:
         response = await client.chat.completions.create(
@@ -164,6 +168,22 @@ korrekt ist der 0-basierte Index der richtigen Antwort."""
         if all(k in data for k in ("frage", "optionen", "korrekt")):
             data["id"] = item_id
             data["niveau"] = niveau
+            optionen = data.get("optionen", [])
+            korrekt_idx = data.get("korrekt", 0)
+            korrekte_antwort_text = data.get("korrekte_antwort_text", "")
+            # Selbstvalidierung: korrekte_antwort_text muss mit optionen[korrekt] übereinstimmen
+            if korrekte_antwort_text and 0 <= korrekt_idx < len(optionen):
+                if optionen[korrekt_idx].strip() != korrekte_antwort_text.strip():
+                    # GPT hat sich selbst widersprochen – korrekte_antwort_text als Wahrheit nehmen
+                    try:
+                        echter_idx = next(
+                            i for i, opt in enumerate(optionen)
+                            if opt.strip() == korrekte_antwort_text.strip()
+                        )
+                        data["korrekt"] = echter_idx
+                        print(f"[M1] Selbstkorrektur: korrekt {korrekt_idx}→{echter_idx} ('{korrekte_antwort_text}')")
+                    except StopIteration:
+                        pass  # Text nicht gefunden, Index beibehalten
             return _mische_optionen(data)
     except Exception as e:
         print(f"[M1] Fragen-Generierung fehlgeschlagen (Niveau {niveau}): {e}")
