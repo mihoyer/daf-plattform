@@ -124,36 +124,73 @@ async def generiere_eine_frage(
         beispiele = ", ".join(bereits_verwendet[-5:])
         vermeidungs_hinweis = f'\nVermeide Fragen die diesen ähneln: {beispiele}'
 
-    prompt = f"""Du bist ein DaF-Experte und Prüfungsautor. Erstelle genau EINE Multiple-Choice-Frage für CEFR-Niveau {niveau}.
+    # Niveau-spezifische Beispiele und Regeln
+    niveau_beispiele = {
+        "A1": {
+            "fokus": "sein/haben, ich/du/er-Formen, Grundwortschatz",
+            "beispiel": 'Frage: "Ich ___ Student." | Optionen: ["bin", "bist", "ist", "sind"] | korrekt: 0',
+            "regel": "Sehr kurze, einfache Sätze. Nur Präsens. Keine Nebensätze."
+        },
+        "A2": {
+            "fokus": "Perfekt, Artikel, einfache Präpositionen, Modalverben",
+            "beispiel": 'Frage: "Gestern ___ ich ins Kino gegangen." | Optionen: ["bin", "habe", "war", "wurde"] | korrekt: 0',
+            "regel": "Einfache Sätze, ein grammatischer Fokus. Keine verschachtelten Strukturen."
+        },
+        "B1": {
+            "fokus": "Nebensätze (weil/dass/wenn), alle Kasus, Konjunktiv II einfach",
+            "beispiel": 'Frage: "Er kommt nicht, ___ er krank ist." | Optionen: ["weil", "dass", "ob", "wenn"] | korrekt: 0',
+            "regel": "Klare Lucksätze. Ein Nebensatz maximal. Eindeutige richtige Antwort."
+        },
+        "B2": {
+            "fokus": "Konjunktiv II, Passiv, Relativsätze, idiomatischer Ausdruck",
+            "beispiel": 'Frage: "Das Buch ___ von vielen Schülern gelesen." | Optionen: ["wird", "ist", "hat", "kann"] | korrekt: 0',
+            "regel": "Klare Satzstruktur. Keine doppelten Konjunktiv-Konstruktionen."
+        },
+        "C1": {
+            "fokus": "Stilistik, seltene Konstruktionen, Fachvokabular, Präpositionalphrasen",
+            "beispiel": 'Frage: "___ seiner Bemühungen scheiterte das Projekt." | Optionen: ["Trotz", "Wegen", "Durch", "Gegen"] | korrekt: 0',
+            "regel": "Anspruchsvoll aber eindeutig. Keine mehrdeutigen Konstruktionen."
+        },
+        "C2": {
+            "fokus": "Nuancen, konzessive Konjunktiv-Konstruktionen, literarische Sprache",
+            "beispiel": 'Frage: "Er bestand darauf, ___ die Entscheidung selbst zu treffen." | Optionen: ["dass", "ob", "wenn", "weil"] | korrekt: 0',
+            "regel": "Höchste Präzision. Nur wenn die richtige Antwort absolut eindeutig ist."
+        },
+    }
+    nb = niveau_beispiele.get(niveau, niveau_beispiele["B1"])
 
-Thema: {thema}
-Grammatischer Schwerpunkt: {fokus}
-Niveau {niveau}: {NIVEAU_BESCHREIBUNGEN[niveau]}
+    prompt = f"""Du bist DaF-Prüfungsautor (Goethe-Institut Niveau). Erstelle EINE Multiple-Choice-Frage.
+
+NIVEAU: {niveau}
+THEMA: {thema}
+GRAMMATIK-FOKUS: {fokus}
+
+REGELN FÜR DIESES NIVEAU:
+- Grammatischer Fokus: {nb['fokus']}
+- Regel: {nb['regel']}
+- Beispiel für gute Frage: {nb['beispiel']}
 {vermeidungs_hinweis}
 {hilfs_hinweis}
 
-Strenge Anforderungen:
-- Authentischer, natürlicher Satz zum Thema "{thema}"
-- Genau 4 Antwortoptionen, genau EINE davon ist grammatisch und inhaltlich korrekt
-- Die 3 Distraktoren sind FALSCH aber plausibel (typische Lernerfehler auf diesem Niveau)
-- WICHTIG: Prüfe vor der Ausgabe nochmals: Ist optionen[korrekt] wirklich die einzig richtige Antwort?
-- Stelle sicher dass der Satz mit der richtigen Option grammatisch und semantisch einwandfrei ist
-- Kurze, präzise grammatische Erklärung warum die richtige Antwort korrekt ist
+PFLICHTREGELN (IMMER einhalten):
+1. Einfacher, natürlicher Lucksätz mit _____ als Platzhalter
+2. Genau 4 kurze Optionen (1-4 Wörter je Option)
+3. Genau EINE richtige Antwort - die anderen 3 sind eindeutig falsch
+4. Distraktoren = typische Fehler auf diesem Niveau (nicht zufällige Wörter)
+5. Der vollständige Satz mit der richtigen Option muss grammatisch einwandfrei sein
+6. korrekte_antwort_text MUSS exakt mit optionen[korrekt] übereinstimmen
 
-Antworte ausschließlich mit diesem JSON-Objekt:
+Antworte NUR mit diesem JSON:
 {{
   "id": {item_id},
-  "frage": "Lückensatz mit _____ als Lücke oder konkrete Frage auf Deutsch",
+  "frage": "Satz mit _____ als Lucke",
   "optionen": ["Option A", "Option B", "Option C", "Option D"],
   "korrekt": 0,
-  "korrekte_antwort_text": "Die korrekte Option als Text (zur Selbstprüfung)",
-  "erklaerung": "Grammatische Erklärung warum diese Antwort korrekt ist",
+  "korrekte_antwort_text": "exakt derselbe Text wie optionen[korrekt]",
+  "erklaerung": "Warum diese Option korrekt ist (1-2 Sätze)",
   "niveau": "{niveau}",
   "thema": "{thema}"
-}}
-
-korrekt ist der 0-basierte Index der richtigen Antwort in optionen[].
-Beispiel: Wenn optionen[2] korrekt ist, dann korrekt=2 und korrekte_antwort_text=optionen[2]."""
+}}"""
 
     for versuch in range(3):  # Bis zu 3 Versuche
         try:
