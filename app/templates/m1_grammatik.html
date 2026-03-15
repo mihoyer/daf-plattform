@@ -178,37 +178,47 @@ async function waehleAntwort(optionIdx) {
   });
 
   const istKorrekt = optionIdx === frage.korrekt;
-
-  // Wenn noch nicht letzte Frage: nächste Frage vom Server holen (adaptiv)
   const istLetzte = aktuelleFrageIdx >= GESAMT_FRAGEN - 1;
   const istEinstiegsphase = aktuelleFrageIdx < alleFragen.length - 1;
 
-  if (!istLetzte && !istEinstiegsphase) {
-    // Adaptive Phase: nächste Frage vom Server anfordern
-    wartendAufNaechste = true;
-    document.getElementById('btn-weiter').textContent = 'Nächste Frage wird generiert…';
-    document.getElementById('btn-weiter').disabled = true;
-
-    try {
-      const res = await fetch(`/api/m1/${token}/naechste`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_id: frage.id, gewaehlt: optionIdx }),
-      });
-      const data = await res.json();
-      alleFragen.push(data.frage);
-      geschaetztesNiveau = data.geschaetztes_niveau || geschaetztesNiveau;
-    } catch (e) {
-      console.error('Fehler beim Laden der nächsten Frage:', e);
-    }
-    wartendAufNaechste = false;
-  }
-
+  // 1. Feedback SOFORT anzeigen
   zeigeFeedback(istKorrekt, frage.erklaerung, frage.optionen[frage.korrekt]);
 
+  // 2. Weiter-Button sofort aktivieren (mit Ladehinweis falls nächste Frage noch fehlt)
   document.getElementById('btn-weiter').disabled = false;
   document.getElementById('btn-weiter').textContent =
     istLetzte ? 'Auswertung starten →' : 'Weiter →';
+
+  // 3. Nächste Frage PARALLEL im Hintergrund laden (ohne den Nutzer zu blockieren)
+  if (!istLetzte && !istEinstiegsphase) {
+    wartendAufNaechste = true;
+    // Weiter-Button zeigt Ladeindikator wenn Nutzer zu schnell klickt
+    const btnWeiter = document.getElementById('btn-weiter');
+
+    fetch(`/api/m1/${token}/naechste`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: frage.id, gewaehlt: optionIdx }),
+    })
+    .then(r => r.json())
+    .then(data => {
+      alleFragen.push(data.frage);
+      geschaetztesNiveau = data.geschaetztes_niveau || geschaetztesNiveau;
+      wartendAufNaechste = false;
+      // Falls Nutzer bereits auf Weiter gewartet hat: jetzt entsperren
+      if (btnWeiter.dataset.wartet === '1') {
+        btnWeiter.dataset.wartet = '0';
+        btnWeiter.disabled = false;
+        btnWeiter.textContent = 'Weiter →';
+        aktuelleFrageIdx++;
+        zeigeAktuelleFrage();
+      }
+    })
+    .catch(e => {
+      console.error('Fehler beim Laden der nächsten Frage:', e);
+      wartendAufNaechste = false;
+    });
+  }
 }
 
 // ── Feedback ───────────────────────────────────────────────────────────────
@@ -234,20 +244,21 @@ async function weiter() {
     return;
   }
 
-  aktuelleFrageIdx++;
+  const naechsterIdx = aktuelleFrageIdx + 1;
 
-  // Falls wir in der Einstiegsphase noch vorhandene Fragen haben
-  if (aktuelleFrageIdx < alleFragen.length) {
+  // Nächste Frage bereits vorhanden? Sofort zeigen.
+  if (naechsterIdx < alleFragen.length) {
+    aktuelleFrageIdx = naechsterIdx;
     zeigeAktuelleFrage();
-  } else {
-    // Sollte nicht passieren (nächste Frage wurde bereits geladen)
-    document.getElementById('btn-weiter').disabled = true;
-    document.getElementById('btn-weiter').textContent = 'Wird geladen…';
-    // Kurz warten und neu prüfen
-    setTimeout(() => {
-      if (aktuelleFrageIdx < alleFragen.length) zeigeAktuelleFrage();
-    }, 500);
+    return;
   }
+
+  // Nächste Frage wird noch generiert: Button sperren und warten
+  const btn = document.getElementById('btn-weiter');
+  btn.disabled = true;
+  btn.textContent = 'Nächste Frage wird generiert…';
+  btn.dataset.wartet = '1';
+  // Die .then()-Kette in waehleAntwort() wird den Button entsperren und weiternavigieren
 }
 
 // ── Endauswertung ──────────────────────────────────────────────────────────
