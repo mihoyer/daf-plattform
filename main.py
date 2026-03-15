@@ -16,6 +16,7 @@ from app.models.database import init_db
 from app.routers.main_router import router as main_router
 from app.routers.admin_router import router as admin_router
 from app.routers.export_router import router as export_router
+from app.routers.kandidaten_router import router as kandidaten_router
 
 
 @asynccontextmanager
@@ -48,6 +49,7 @@ templates = Jinja2Templates(directory="app/templates")
 app.include_router(main_router)
 app.include_router(admin_router)
 app.include_router(export_router)
+app.include_router(kandidaten_router)
 
 
 # ── Frontend-Routen ──────────────────────────────────────────────────────────
