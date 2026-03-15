@@ -475,6 +475,7 @@ Antworte NUR mit JSON: {{"saetze": ["Satz 1", "Satz 2", "Satz 3"]}}"""}],
 async def m4_upload(
     token: str,
     audio: UploadFile = File(...),
+    mime_type: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
     sess = await session_service.lade_session(db, token)
@@ -485,8 +486,16 @@ async def m4_upload(
     if not modul:
         raise HTTPException(status_code=404, detail="M4 nicht gefunden.")
 
-    # Datei speichern
-    ext = ".webm"
+    # Dateiendung aus Dateiname oder Content-Type ableiten (iOS liefert .mp4)
+    original_name = audio.filename or ""
+    content_type = mime_type or audio.content_type or ""
+    if original_name.endswith(".mp4") or "mp4" in content_type:
+        ext = ".mp4"
+    elif original_name.endswith(".ogg") or "ogg" in content_type:
+        ext = ".ogg"
+    else:
+        ext = ".webm"
+
     pfad = os.path.join(UPLOAD_DIR, f"m4_{token}_{secrets.token_hex(8)}{ext}")
     content = await audio.read()
     max_bytes = settings.max_audio_mb * 1024 * 1024
@@ -620,6 +629,7 @@ async def m5_upload(
     token: str,
     audio: UploadFile = File(...),
     modus: str = Form("tief"),
+    mime_type: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
     sess = await session_service.lade_session(db, token)
@@ -630,7 +640,16 @@ async def m5_upload(
     if not modul:
         raise HTTPException(status_code=404, detail="M5 nicht gefunden.")
 
-    ext = ".webm"
+    # Dateiendung aus Dateiname oder Content-Type ableiten (iOS liefert .mp4)
+    original_name = audio.filename or ""
+    content_type = mime_type or audio.content_type or ""
+    if original_name.endswith(".mp4") or "mp4" in content_type:
+        ext = ".mp4"
+    elif original_name.endswith(".ogg") or "ogg" in content_type:
+        ext = ".ogg"
+    else:
+        ext = ".webm"
+
     pfad = os.path.join(UPLOAD_DIR, f"m5_{token}_{secrets.token_hex(8)}{ext}")
     content = await audio.read()
     max_bytes = settings.max_audio_mb * 1024 * 1024
@@ -967,8 +986,7 @@ async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
         }
 
         # Kompetenz-Übersichtstabelle
-        from reportlab.platypus import Drawing
-        from reportlab.graphics.shapes import Rect, String, Group
+        from reportlab.graphics.shapes import Drawing, Rect, String, Group
         from reportlab.graphics import renderPDF
 
         uebersicht_data = [['Kompetenz', 'Score', 'CEFR', 'Bewertung']]
