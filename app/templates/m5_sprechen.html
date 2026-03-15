@@ -29,8 +29,7 @@
       <div class="alert alert-info mt-3">
         <span class="alert-icon">💬</span>
         <div>
-          <strong id="aufgabe-titel">–</strong>
-          <p class="text-sm mt-1" id="aufgabe-text">–</p>
+          <p class="text-sm mt-1" id="aufgabe-titel">–</p>
         </div>
       </div>
     </div>
@@ -135,7 +134,6 @@ async function ladeAufgabe() {
     const data = await res.json();
     aufgabeId = data.niveau || 'B1';
     document.getElementById('aufgabe-titel').textContent = data.thema;
-    document.getElementById('aufgabe-text').textContent = data.thema;
     document.getElementById('lade-bereich').classList.add('hidden');
     document.getElementById('aufgabe-bereich').classList.remove('hidden');
   } catch (e) {
