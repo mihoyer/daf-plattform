@@ -868,9 +868,90 @@ async def ergebnis(token: str, db: AsyncSession = Depends(get_db)):
 
 # ── PDF-Export ────────────────────────────────────────────────────────────────
 
+def _zeichne_radar(module_daten: list) -> object:
+    """Zeichnet ein Spinnennetz-Diagramm (Radar-Chart) mit ReportLab."""
+    import math
+    from reportlab.graphics.shapes import Drawing, Polygon, Circle, Line, String, Group
+    from reportlab.lib import colors
+
+    n = len(module_daten)
+    if n < 3:
+        return None
+
+    size = 200
+    cx, cy = size / 2, size / 2
+    r_max = size / 2 - 30  # Radius für 100%
+
+    drawing = Drawing(size, size)
+
+    # Hintergrund-Ringe (20, 40, 60, 80, 100)
+    ring_farbe = colors.HexColor('#e5e7eb')
+    for pct in [20, 40, 60, 80, 100]:
+        r = r_max * pct / 100
+        punkte = []
+        for i in range(n):
+            winkel = math.pi / 2 + 2 * math.pi * i / n
+            punkte.extend([cx + r * math.cos(winkel), cy + r * math.sin(winkel)])
+        poly = Polygon(punkte, strokeColor=ring_farbe, strokeWidth=0.5, fillColor=None)
+        drawing.add(poly)
+
+    # Achsen
+    for i in range(n):
+        winkel = math.pi / 2 + 2 * math.pi * i / n
+        x_end = cx + r_max * math.cos(winkel)
+        y_end = cy + r_max * math.sin(winkel)
+        drawing.add(Line(cx, cy, x_end, y_end, strokeColor=ring_farbe, strokeWidth=0.5))
+
+    # Datenpunkte
+    data_punkte = []
+    for i, (name, score) in enumerate(module_daten):
+        r = r_max * min(score, 100) / 100
+        winkel = math.pi / 2 + 2 * math.pi * i / n
+        data_punkte.extend([cx + r * math.cos(winkel), cy + r * math.sin(winkel)])
+
+    # Gefüllte Fläche
+    if len(data_punkte) >= 6:
+        poly_fill = Polygon(
+            data_punkte,
+            strokeColor=colors.HexColor('#2563eb'),
+            strokeWidth=1.5,
+            fillColor=colors.HexColor('#2563eb'),
+            fillOpacity=0.2,
+        )
+        drawing.add(poly_fill)
+
+    # Punkte auf den Achsen
+    for i, (name, score) in enumerate(module_daten):
+        r = r_max * min(score, 100) / 100
+        winkel = math.pi / 2 + 2 * math.pi * i / n
+        px = cx + r * math.cos(winkel)
+        py = cy + r * math.sin(winkel)
+        dot_farbe = colors.HexColor('#22c55e') if score >= 70 else colors.HexColor('#f59e0b') if score >= 40 else colors.HexColor('#ef4444')
+        drawing.add(Circle(px, py, 4, fillColor=dot_farbe, strokeColor=colors.white, strokeWidth=1))
+
+    # Achsenbeschriftungen
+    for i, (name, score) in enumerate(module_daten):
+        winkel = math.pi / 2 + 2 * math.pi * i / n
+        label_r = r_max + 18
+        lx = cx + label_r * math.cos(winkel)
+        ly = cy + label_r * math.sin(winkel)
+        # Textanker je nach Position
+        if lx < cx - 5:
+            anchor = 'end'
+        elif lx > cx + 5:
+            anchor = 'start'
+        else:
+            anchor = 'middle'
+        s = String(lx, ly - 4, name, fontSize=7.5, fontName='Helvetica-Bold',
+                   fillColor=colors.HexColor('#374151'), textAnchor=anchor)
+        drawing.add(s)
+
+    return drawing
+
+
 @router.get("/api/export/pdf/{token}")
 async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
-    """Exportiert den Einstufungsbericht als PDF."""
+    """Exportiert den vollständigen Einstufungsbericht als PDF mit Radar-Diagramm."""
     from fastapi.responses import StreamingResponse
     import io
 
@@ -878,57 +959,37 @@ async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
     if not sess:
         raise HTTPException(status_code=404, detail="Session nicht gefunden.")
 
-    # HTML für PDF aufbauen
-    module_html = ""
-    for m in sorted(sess.module, key=lambda x: x.reihenfolge):
-        score = round(m.gesamt_score or 0)
-        cefr = m.cefr_niveau.value if m.cefr_niveau else "–"
-        analyse = m.get_ki_analyse() or {}
-        zusammenfassung = analyse.get("zusammenfassung", analyse.get("feedback", ""))
-        module_html += f"""
-        <div style="margin-bottom:1.5rem; padding:1rem; border:1px solid #e5e7eb; border-radius:8px;">
-          <h3 style="margin:0 0 .5rem;">{m.modul.value.replace('_', ' ').title()}</h3>
-          <p style="margin:.25rem 0; color:#6b7280;">Score: {score}/100 &nbsp;|&nbsp; CEFR: {cefr}</p>
-          {f'<p style="margin:.5rem 0; font-size:.9rem;">{zusammenfassung}</p>' if zusammenfassung else ''}
-        </div>"""
-
     gesamt_score = round(sess.gesamt_score or 0)
     gesamt_niveau = sess.gesamt_niveau.value if sess.gesamt_niveau else "–"
     datum = datetime.now(timezone.utc).strftime("%d.%m.%Y")
 
-    html = f"""<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="UTF-8">
-  <title>Einstufungsbericht – DaF Sprachdiagnostik</title>
-  <style>
-    body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; color: #1f2937; }}
-    h1 {{ color: #1e3a5f; }} h2 {{ color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom:.5rem; }}
-    .score-box {{ display:inline-block; background:#f0f4ff; border-radius:8px; padding:1rem 2rem; margin:.5rem; text-align:center; }}
-    .score-big {{ font-size:2.5rem; font-weight:800; color:#2563eb; }}
-    footer {{ margin-top:3rem; font-size:.8rem; color:#9ca3af; border-top:1px solid #e5e7eb; padding-top:1rem; }}
-  </style>
-</head>
-<body>
-  <h1>Einstufungsbericht – DaF Sprachdiagnostik</h1>
-  <p style="color:#6b7280;">Erstellt am {datum} &nbsp;|&nbsp; Session: {token[:8]}…</p>
-  <div style="margin:1.5rem 0;">
-    <div class="score-box"><div class="score-big">{gesamt_score}</div><div>Gesamtscore</div></div>
-    <div class="score-box"><div class="score-big">{gesamt_niveau}</div><div>CEFR-Niveau</div></div>
-  </div>
-  <h2>Modul-Ergebnisse</h2>
-  {module_html if module_html else '<p style="color:#6b7280;">Keine abgeschlossenen Module.</p>'}
-  <footer>DaF Sprachdiagnostik – Automatisch generierter Bericht. Alle Daten werden nach dem Export gelöscht.</footer>
-</body>
-</html>"""
+    MODUL_NAMEN = {
+        'm1_grammatik': 'Grammatik & Wortschatz',
+        'm2_lesen': 'Lesen & Leseverstehen',
+        'm3_hoerverstehen': 'Hörverstehen',
+        'm4_vorlesen': 'Vorlesen',
+        'm5_sprechen': 'Freies Sprechen',
+        'm6_schreiben': 'Schreiben',
+    }
+    MODUL_KURZ = {
+        'm1_grammatik': 'Grammatik',
+        'm2_lesen': 'Lesen',
+        'm3_hoerverstehen': 'Hören',
+        'm4_vorlesen': 'Vorlesen',
+        'm5_sprechen': 'Sprechen',
+        'm6_schreiben': 'Schreiben',
+    }
 
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import cm
         from reportlab.lib import colors
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, KeepTogether
+        from reportlab.platypus.flowables import HRFlowable
         from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        from reportlab.graphics import renderPDF
+        from reportlab.graphics.shapes import Drawing
 
         pdf_buffer = io.BytesIO()
         doc = SimpleDocTemplate(
@@ -938,56 +999,113 @@ async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
         styles = getSampleStyleSheet()
         story = []
 
-        # Titel
-        title_style = ParagraphStyle('title', parent=styles['Title'], fontSize=20, textColor=colors.HexColor('#1e3a5f'), spaceAfter=6)
-        sub_style = ParagraphStyle('sub', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#6b7280'), spaceAfter=20)
-        story.append(Paragraph('Einstufungsbericht – DaF Sprachdiagnostik', title_style))
-        story.append(Paragraph(f'Erstellt am {datum}  |  Session: {token[:8]}…', sub_style))
-        story.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#e5e7eb'), spaceAfter=16))
+        # ── Stile ────────────────────────────────────────────────────
+        title_style = ParagraphStyle('title', parent=styles['Title'], fontSize=20,
+            textColor=colors.HexColor('#1e3a5f'), spaceAfter=4)
+        sub_style = ParagraphStyle('sub', parent=styles['Normal'], fontSize=9,
+            textColor=colors.HexColor('#6b7280'), spaceAfter=4)
+        ki_style = ParagraphStyle('ki', parent=styles['Normal'], fontSize=8,
+            textColor=colors.HexColor('#0369a1'), spaceAfter=16,
+            backColor=colors.HexColor('#f0f9ff'), borderPadding=(4, 6, 4, 6))
+        h2_style = ParagraphStyle('h2', parent=styles['Heading2'], fontSize=13,
+            textColor=colors.HexColor('#1e3a5f'), spaceBefore=16, spaceAfter=8)
+        h3_style = ParagraphStyle('h3', parent=styles['Heading3'], fontSize=10,
+            textColor=colors.HexColor('#374151'), spaceBefore=10, spaceAfter=4)
+        body_style = ParagraphStyle('body', parent=styles['Normal'], fontSize=9,
+            textColor=colors.HexColor('#374151'), spaceAfter=4)
+        muted_style = ParagraphStyle('muted', parent=styles['Normal'], fontSize=8.5,
+            textColor=colors.HexColor('#6b7280'), spaceAfter=4)
+        skill_style = ParagraphStyle('skill', parent=styles['Normal'], fontSize=8,
+            textColor=colors.HexColor('#374151'), spaceAfter=2, leftIndent=8)
+        footer_style = ParagraphStyle('footer', parent=styles['Normal'], fontSize=7.5,
+            textColor=colors.HexColor('#9ca3af'))
 
-        # Gesamtscore-Tabelle
-        score_data = [['Gesamtscore', 'CEFR-Niveau'], [f'{gesamt_score}/100', gesamt_niveau]]
-        score_table = Table(score_data, colWidths=[8*cm, 8*cm])
+        # ── Kopfzeile ────────────────────────────────────────────────
+        story.append(Paragraph('Einstufungsbericht – DaF Sprachdiagnostik', title_style))
+        story.append(Paragraph(f'Erstellt am {datum}  |  Session: {token[:8]}…', sub_style))
+        story.append(Paragraph('KI-generierter Bericht – gelegentliche Ungenauigkeiten möglich.', ki_style))
+        story.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#e5e7eb'), spaceAfter=12))
+
+        # ── Gesamtergebnis-Box ────────────────────────────────────────
+        cefr_farben = {'A1':'#dc2626','A2':'#ea580c','B1':'#d97706','B2':'#65a30d','C1':'#0891b2','C2':'#7c3aed'}
+        cefr_farbe = cefr_farben.get(gesamt_niveau, '#374151')
+        score_color_hex = '#22c55e' if gesamt_score >= 70 else '#f59e0b' if gesamt_score >= 40 else '#ef4444'
+
+        score_data = [
+            [Paragraph('<b>Gesamtscore</b>', body_style), Paragraph('<b>CEFR-Einstufung</b>', body_style)],
+            [
+                Paragraph(f'<font size="28" color="{score_color_hex}"><b>{gesamt_score}</b></font><font size="11" color="#6b7280">/100</font>', body_style),
+                Paragraph(f'<font size="28" color="{cefr_farbe}"><b>{gesamt_niveau}</b></font>', body_style),
+            ]
+        ]
+        score_table = Table(score_data, colWidths=[8.25*cm, 8.25*cm])
         score_table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f0f4ff')),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#374151')),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0,0), (-1,0), 10),
-            ('FONTSIZE', (0,1), (-1,1), 22),
-            ('FONTNAME', (0,1), (-1,1), 'Helvetica-Bold'),
-            ('TEXTCOLOR', (0,1), (0,1), colors.HexColor('#2563eb')),
+            ('BACKGROUND', (0,1), (-1,1), colors.HexColor('#f8fafc')),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ROWBACKGROUND', (0,1), (-1,1), colors.HexColor('#f8fafc')),
-            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#e5e7eb')),
+            ('BOX', (0,0), (-1,-1), 0.8, colors.HexColor('#dbeafe')),
             ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e5e7eb')),
             ('TOPPADDING', (0,0), (-1,-1), 10),
             ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+            ('ROUNDEDCORNERS', [4]),
         ]))
         story.append(score_table)
         story.append(Spacer(1, 20))
 
-        # Modul-Ergebnisse
-        h2_style = ParagraphStyle('h2', parent=styles['Heading2'], fontSize=13, textColor=colors.HexColor('#374151'), spaceBefore=12, spaceAfter=8)
-        body_style = ParagraphStyle('body', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#374151'), spaceAfter=4)
-        muted_style = ParagraphStyle('muted', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#6b7280'), spaceAfter=4)
+        # ── Kompetenzprofil: Radar + Balken nebeneinander ─────────────
+        module_sortiert = sorted(sess.module, key=lambda x: x.reihenfolge)
+        radar_daten = []
+        for m in module_sortiert:
+            m_score = round(m.gesamt_score or 0)
+            kurz = MODUL_KURZ.get(m.modul.value, m.modul.value)
+            radar_daten.append((kurz, m_score))
 
-        # Kompetenzübersicht als Tabelle (Balkendiagramm-Ersatz)
-        story.append(Paragraph('Kompetenzübersicht', h2_style))
+        story.append(Paragraph('Kompetenzprofil', h2_style))
         story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#e5e7eb'), spaceAfter=8))
 
-        MODUL_NAMEN = {
-            'm1_grammatik': 'Grammatik & Wortschatz',
-            'm2_lesen': 'Lesen & Leseverstehen',
-            'm3_hoerverstehen': 'Hörverstehen',
-            'm4_vorlesen': 'Vorlesen',
-            'm5_sprechen': 'Freies Sprechen',
-            'm6_schreiben': 'Schreiben',
-        }
+        # Radar-Diagramm zeichnen
+        radar_drawing = _zeichne_radar(radar_daten)
 
-        # Kompetenz-Übersichtstabelle
-        from reportlab.graphics.shapes import Drawing, Rect, String, Group
-        from reportlab.graphics import renderPDF
+        # Balken-Tabelle (rechts neben Radar)
+        balken_data = []
+        for m in module_sortiert:
+            m_score = round(m.gesamt_score or 0)
+            m_cefr = m.cefr_niveau.value if m.cefr_niveau else '–'
+            m_name = MODUL_NAMEN.get(m.modul.value, m.modul.value)
+            s_color = '#22c55e' if m_score >= 70 else '#f59e0b' if m_score >= 40 else '#ef4444'
+            balken_data.append([
+                Paragraph(f'<b>{m_name}</b>', ParagraphStyle('bn', parent=styles['Normal'], fontSize=8)),
+                Paragraph(f'<font color="{s_color}"><b>{m_score}/100</b></font>  <font color="#6b7280">{m_cefr}</font>',
+                          ParagraphStyle('bs', parent=styles['Normal'], fontSize=8)),
+            ])
+        balken_table = Table(balken_data, colWidths=[5.5*cm, 3*cm])
+        balken_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+            ('ROWBACKGROUND', (0,0), (-1,-1), [colors.HexColor('#f8fafc'), colors.white]),
+            ('BOX', (0,0), (-1,-1), 0.3, colors.HexColor('#e5e7eb')),
+            ('INNERGRID', (0,0), (-1,-1), 0.2, colors.HexColor('#f3f4f6')),
+        ]))
+
+        if radar_drawing:
+            viz_table = Table(
+                [[radar_drawing, balken_table]],
+                colWidths=[8.5*cm, 8*cm]
+            )
+            viz_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('ALIGN', (0,0), (0,0), 'CENTER'),
+            ]))
+            story.append(viz_table)
+        else:
+            story.append(balken_table)
+        story.append(Spacer(1, 20))
+
+        # ── Kompetenzübersicht-Tabelle ───────────────────────────────
+        story.append(Paragraph('Kompetenzübersicht', h2_style))
+        story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#e5e7eb'), spaceAfter=8))
 
         uebersicht_data = [['Kompetenz', 'Score', 'CEFR', 'Bewertung']]
         uebersicht_style_cmds = [
@@ -1002,14 +1120,15 @@ async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
             ('TOPPADDING', (0,0), (-1,-1), 6),
             ('BOTTOMPADDING', (0,0), (-1,-1), 6),
         ]
-        for i, m in enumerate(sorted(sess.module, key=lambda x: x.reihenfolge), 1):
+        for i, m in enumerate(module_sortiert, 1):
             m_score = round(m.gesamt_score or 0)
             m_cefr = m.cefr_niveau.value if m.cefr_niveau else '–'
             m_name = MODUL_NAMEN.get(m.modul.value, m.modul.value)
-            bewertung = '★★★★★' if m_score >= 80 else '★★★★☆' if m_score >= 65 else '★★★☆☆' if m_score >= 50 else '★★☆☆☆' if m_score >= 35 else '★☆☆☆☆'
-            uebersicht_data.append([m_name, f'{m_score}/100', m_cefr, bewertung])
-            score_color = colors.HexColor('#22c55e') if m_score >= 70 else colors.HexColor('#f59e0b') if m_score >= 40 else colors.HexColor('#ef4444')
-            uebersicht_style_cmds.append(('TEXTCOLOR', (1, i), (1, i), score_color))
+            sterne = '★' * (5 if m_score >= 80 else 4 if m_score >= 65 else 3 if m_score >= 50 else 2 if m_score >= 35 else 1)
+            sterne += '☆' * (5 - len(sterne))
+            uebersicht_data.append([m_name, f'{m_score}/100', m_cefr, sterne])
+            s_color = colors.HexColor('#22c55e') if m_score >= 70 else colors.HexColor('#f59e0b') if m_score >= 40 else colors.HexColor('#ef4444')
+            uebersicht_style_cmds.append(('TEXTCOLOR', (1, i), (1, i), s_color))
             uebersicht_style_cmds.append(('FONTNAME', (1, i), (1, i), 'Helvetica-Bold'))
             if i % 2 == 0:
                 uebersicht_style_cmds.append(('BACKGROUND', (0, i), (-1, i), colors.HexColor('#f8fafc')))
@@ -1019,45 +1138,49 @@ async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
         story.append(uebersicht_table)
         story.append(Spacer(1, 20))
 
-        # Detaillierte Modul-Ergebnisse
+        # ── Detaillierte Modul-Ergebnisse ─────────────────────────────
         story.append(Paragraph('Detaillierte Modul-Ergebnisse', h2_style))
         story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#e5e7eb'), spaceAfter=8))
 
-        skill_style = ParagraphStyle('skill', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#374151'), spaceAfter=2, leftIndent=10)
-
-        for m in sorted(sess.module, key=lambda x: x.reihenfolge):
+        for m in module_sortiert:
             m_score = round(m.gesamt_score or 0)
             m_cefr = m.cefr_niveau.value if m.cefr_niveau else '–'
             m_name = MODUL_NAMEN.get(m.modul.value, m.modul.value)
             analyse = m.get_ki_analyse() or {}
-
+            text_analyse = analyse.get('text_analyse', analyse)
             score_color_hex = '#22c55e' if m_score >= 70 else '#f59e0b' if m_score >= 40 else '#ef4444'
-            story.append(Paragraph(
-                f'<b><font color="#1e3a5f">{m_name}</font></b> — '
-                f'<font color="{score_color_hex}"><b>{m_score}/100</b></font> | CEFR: <b>{m_cefr}</b>',
-                body_style
+
+            modul_block = []
+            modul_block.append(Paragraph(
+                f'<b><font color="#1e3a5f">{m_name}</font></b>  '
+                f'<font color="{score_color_hex}"><b>{m_score}/100</b></font>  '
+                f'<font color="#6b7280">CEFR: <b>{m_cefr}</b></font>',
+                h3_style
             ))
 
             # Gesamteinschätzung
             einschaetzung = (
+                text_analyse.get('gesamteinschaetzung') or
                 analyse.get('gesamteinschaetzung') or
-                analyse.get('text_analyse', {}).get('gesamteinschaetzung') or
                 analyse.get('zusammenfassung') or ''
             )
             if einschaetzung:
-                story.append(Paragraph(einschaetzung, muted_style))
+                modul_block.append(Paragraph(einschaetzung, muted_style))
 
-            # Skills als Tabelle (falls vorhanden)
-            text_analyse = analyse.get('text_analyse', analyse)
+            # Skills-Tabelle
             alle_skills = {}
-            for kategorie in ('grammatik', 'wortschatz', 'pragmatik', 'aussprache'):
+            for kategorie in ('grammatik', 'wortschatz', 'pragmatik', 'aussprache',
+                              'rechtschreibung', 'kohärenz', 'aufgabenerfüllung'):
                 kat_data = text_analyse.get(kategorie, {})
                 if isinstance(kat_data, dict):
-                    for skill_name, skill_data in kat_data.items():
-                        if isinstance(skill_data, dict) and 'score' in skill_data:
-                            alle_skills[skill_name] = skill_data
-            # Einzelne Skills auf oberster Ebene
-            for skill_name in ('satzbau', 'kohaerenz', 'argumentation'):
+                    if 'score' in kat_data:  # Einzelner Skill
+                        alle_skills[kategorie] = kat_data
+                    else:
+                        for skill_name, skill_data in kat_data.items():
+                            if isinstance(skill_data, dict) and 'score' in skill_data:
+                                alle_skills[skill_name] = skill_data
+            for skill_name in ('satzbau', 'kohaerenz', 'argumentation', 'aufgabenerfullung',
+                               'rechtschreibung', 'zeichensetzung', 'textstruktur'):
                 if skill_name in text_analyse and isinstance(text_analyse[skill_name], dict):
                     alle_skills[skill_name] = text_analyse[skill_name]
 
@@ -1078,37 +1201,116 @@ async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
                 for j, (sname, sdata) in enumerate(alle_skills.items(), 1):
                     s_score = sdata.get('score', 0)
                     s_beg = sdata.get('begruendung', '')
-                    skills_data.append([sname.replace('_', ' ').title(), f'{s_score}/10', s_beg[:80] + ('...' if len(s_beg) > 80 else '')])
+                    label = sname.replace('_', ' ').replace('ae', 'ä').replace('oe', 'ö').replace('ue', 'ü').title()
+                    skills_data.append([
+                        label,
+                        f'{s_score}/10',
+                        s_beg[:100] + ('...' if len(s_beg) > 100 else '')
+                    ])
                     s_color = colors.HexColor('#22c55e') if s_score >= 7 else colors.HexColor('#f59e0b') if s_score >= 4 else colors.HexColor('#ef4444')
                     skills_style_cmds.append(('TEXTCOLOR', (1, j), (1, j), s_color))
                     skills_style_cmds.append(('FONTNAME', (1, j), (1, j), 'Helvetica-Bold'))
                     if j % 2 == 0:
                         skills_style_cmds.append(('BACKGROUND', (0, j), (-1, j), colors.HexColor('#fafafa')))
-
-                skills_table = Table(skills_data, colWidths=[4*cm, 1.5*cm, 10.5*cm])
+                skills_table = Table(skills_data, colWidths=[4*cm, 1.5*cm, 11*cm])
                 skills_table.setStyle(TableStyle(skills_style_cmds))
-                story.append(skills_table)
-                story.append(Spacer(1, 4))
+                modul_block.append(skills_table)
+                modul_block.append(Spacer(1, 4))
+
+            # Audio-Analyse (M4/M5)
+            audio_analyse = analyse.get('audio_analyse')
+            if audio_analyse and isinstance(audio_analyse, dict):
+                audio_felder = [
+                    ('Verständlichkeit', audio_analyse.get('verstaendlichkeit', {}).get('score') if isinstance(audio_analyse.get('verstaendlichkeit'), dict) else audio_analyse.get('verstaendlichkeit')),
+                    ('Fluss', audio_analyse.get('fluss_fluency', {}).get('score') if isinstance(audio_analyse.get('fluss_fluency'), dict) else audio_analyse.get('fluss_fluency')),
+                    ('Akzent', audio_analyse.get('akzent', {}).get('score') if isinstance(audio_analyse.get('akzent'), dict) else audio_analyse.get('akzent')),
+                    ('Intonation', audio_analyse.get('intonation', {}).get('score') if isinstance(audio_analyse.get('intonation'), dict) else audio_analyse.get('intonation')),
+                ]
+                audio_felder = [(k, v) for k, v in audio_felder if isinstance(v, (int, float))]
+                if audio_felder:
+                    zus = audio_analyse.get('zusammenfassung', '')
+                    if zus:
+                        modul_block.append(Paragraph(f'<b>Aussprache-Analyse:</b> {zus}', skill_style))
+                    audio_row = []
+                    for label, val in audio_felder:
+                        s_color = '#22c55e' if val >= 7 else '#f59e0b' if val >= 4 else '#ef4444'
+                        audio_row.append(Paragraph(f'<b>{label}</b><br/><font color="{s_color}">{val}/10</font>',
+                                                   ParagraphStyle('ac', parent=styles['Normal'], fontSize=8, alignment=1)))
+                    audio_table = Table([audio_row], colWidths=[4*cm] * len(audio_row))
+                    audio_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f0f9ff')),
+                        ('BOX', (0,0), (-1,-1), 0.3, colors.HexColor('#bae6fd')),
+                        ('INNERGRID', (0,0), (-1,-1), 0.2, colors.HexColor('#e0f2fe')),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('TOPPADDING', (0,0), (-1,-1), 6),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                    ]))
+                    modul_block.append(audio_table)
+                    modul_block.append(Spacer(1, 4))
+
+            # Einzelfragen-Details (M1/M2/M3)
+            details = analyse.get('details', [])
+            if details:
+                modul_block.append(Paragraph('<b>Einzelfragen-Auswertung:</b>', skill_style))
+                fragen_data = [['Frage', 'Antwort', 'Korrekt?']]
+                fragen_style = [
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f3f4f6')),
+                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0,0), (-1,-1), 7.5),
+                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                    ('BOX', (0,0), (-1,-1), 0.3, colors.HexColor('#e5e7eb')),
+                    ('INNERGRID', (0,0), (-1,-1), 0.2, colors.HexColor('#f3f4f6')),
+                    ('TOPPADDING', (0,0), (-1,-1), 3),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+                    ('LEFTPADDING', (0,0), (-1,-1), 4),
+                ]
+                for k, d in enumerate(details, 1):
+                    korrekt = d.get('ist_korrekt', False)
+                    fragen_data.append([
+                        d.get('frage', '')[:60] + ('...' if len(d.get('frage','')) > 60 else ''),
+                        d.get('gewaehlt_text', str(d.get('gewaehlt', '')))[:40],
+                        '✓' if korrekt else '✗',
+                    ])
+                    fragen_style.append(('TEXTCOLOR', (2, k), (2, k),
+                        colors.HexColor('#22c55e') if korrekt else colors.HexColor('#ef4444')))
+                    fragen_style.append(('FONTNAME', (2, k), (2, k), 'Helvetica-Bold'))
+                    if k % 2 == 0:
+                        fragen_style.append(('BACKGROUND', (0, k), (-1, k), colors.HexColor('#fafafa')))
+                fragen_table = Table(fragen_data, colWidths=[9*cm, 5*cm, 1.5*cm])
+                fragen_table.setStyle(TableStyle(fragen_style))
+                modul_block.append(fragen_table)
+                modul_block.append(Spacer(1, 4))
 
             # Stärken & Schwächen
-            staerken = analyse.get('staerken') or text_analyse.get('staerken') or []
-            schwaechen = analyse.get('schwaechen') or text_analyse.get('schwaechen') or []
-            empfehlungen = analyse.get('empfehlungen') or text_analyse.get('empfehlungen') or []
+            staerken = text_analyse.get('staerken') or analyse.get('staerken') or []
+            schwaechen = text_analyse.get('schwaechen') or analyse.get('schwaechen') or []
+            empfehlungen = text_analyse.get('empfehlungen') or analyse.get('empfehlungen') or []
             if staerken:
-                story.append(Paragraph(f'<font color="#22c55e">✓ Stärken:</font> {", ".join(staerken)}', skill_style))
+                modul_block.append(Paragraph(
+                    '<font color="#22c55e"><b>✓ Stärken:</b></font> ' + ' · '.join(staerken), skill_style))
             if schwaechen:
-                story.append(Paragraph(f'<font color="#f59e0b">→ Verbesserung:</font> {", ".join(schwaechen)}', skill_style))
+                modul_block.append(Paragraph(
+                    '<font color="#f59e0b"><b>→ Verbesserung:</b></font> ' + ' · '.join(schwaechen), skill_style))
             if empfehlungen:
-                story.append(Paragraph(f'<font color="#2563eb">📌 Empfehlung:</font> {", ".join(empfehlungen)}', skill_style))
+                modul_block.append(Paragraph(
+                    '<font color="#2563eb"><b>Empfehlung:</b></font> ' + ' · '.join(empfehlungen), skill_style))
 
-            story.append(Spacer(1, 10))
-            story.append(HRFlowable(width='100%', thickness=0.3, color=colors.HexColor('#f3f4f6'), spaceAfter=8))
+            modul_block.append(Spacer(1, 8))
+            modul_block.append(HRFlowable(width='100%', thickness=0.3,
+                color=colors.HexColor('#e5e7eb'), spaceAfter=8))
 
-        # Footer
+            story.append(KeepTogether(modul_block[:4]))  # Titel + Einschätzung zusammenhalten
+            for elem in modul_block[4:]:
+                story.append(elem)
+
+        # ── Footer ────────────────────────────────────────────────────
         story.append(Spacer(1, 20))
-        footer_style = ParagraphStyle('footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#9ca3af'))
         story.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#e5e7eb'), spaceAfter=6))
-        story.append(Paragraph('DaF Sprachdiagnostik – Automatisch generierter Bericht.', footer_style))
+        story.append(Paragraph(
+            f'DaF Sprachdiagnostik – Automatisch generierter Bericht  |  Erstellt am {datum}  |  '
+            'KI-generierte Inhalte können gelegentliche Ungenauigkeiten enthalten.',
+            footer_style
+        ))
 
         doc.build(story)
         pdf_buffer.seek(0)
@@ -1118,10 +1320,7 @@ async def export_pdf(token: str, db: AsyncSession = Depends(get_db)):
             headers={"Content-Disposition": f"attachment; filename=einstufungsbericht_{token[:8]}.pdf"}
         )
     except Exception as e:
+        import traceback
         print(f"[PDF-Export fehlgeschlagen]: {e}")
-        # Fallback: HTML zurückgeben
-        return StreamingResponse(
-            io.BytesIO(html.encode("utf-8")),
-            media_type="text/html",
-            headers={"Content-Disposition": f"attachment; filename=einstufungsbericht_{token[:8]}.html"}
-        )
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"PDF-Generierung fehlgeschlagen: {str(e)}")
