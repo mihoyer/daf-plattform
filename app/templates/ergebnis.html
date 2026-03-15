@@ -417,6 +417,20 @@ function zeigeVisualisierungen(module) {
 }
 
 ladeBericht();
+
+// Kandidaten-Abschluss-Benachrichtigung (nur wenn vom QR-Code-System gestartet)
+async function sendeAbschlussNotifikation() {
+  try {
+    await fetch('/api/kandidat/abschluss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    });
+  } catch (e) {
+    // Stilles Scheitern – kein Einfluss auf Nutzererfahrung
+  }
+}
+sendeAbschlussNotifikation();
 </script>
 </body>
 </html>
