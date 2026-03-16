@@ -96,6 +96,8 @@ async def session_status(token: str, db: AsyncSession = Depends(get_db)):
 
 
 # ── Demo-Bypass ─────────────────────────────────────────────────────────────
+# Testgruppen-Modus: Demo-Bypass nur noch über den Kandidaten-Router (/k/{code}).
+# Direktaufrufe werden mit 403 abgewiesen.
 
 @router.post("/api/zahlung/demo-bypass")
 async def demo_bypass(
@@ -103,10 +105,17 @@ async def demo_bypass(
     paket: str = Form("basis"),
     hilfssprache: str = Form("de"),
     waehrung: str = Form("CHF"),
+    kandidat_ref: str = Form(""),  # Wird vom Kandidaten-Router gesetzt
     db: AsyncSession = Depends(get_db),
 ):
-    """Demo-Bypass: Aktiviert eine Session ohne Stripe-Zahlung (nur für Testzwecke)."""
-    if token:
+    """Demo-Bypass: Gesperrt. Zugang nur über personalisierten QR-Code (/k/{code})."""
+    # Testgruppen-Modus: Direktzugang komplett gesperrt
+    raise HTTPException(
+        status_code=403,
+        detail="Zugang nur über personalisierten QR-Code möglich."
+    )
+
+    if token:  # noqa: unreachable
         sess = await session_service.lade_session(db, token)
     else:
         paket_enum = PaketTyp(paket) if paket in PaketTyp._value2member_map_ else PaketTyp.basis
