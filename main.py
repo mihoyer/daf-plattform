@@ -132,6 +132,11 @@ async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request})
 
 
+@app.get("/admin/testgruppe", response_class=HTMLResponse)
+async def testgruppe_dashboard(request: Request):
+    return templates.TemplateResponse("testgruppe_dashboard.html", {"request": request})
+
+
 @app.get("/admin/session/{token}", response_class=HTMLResponse)
 async def admin_session_detail(request: Request, token: str):
     return templates.TemplateResponse("admin_session_detail.html", {"request": request, "token": token})
