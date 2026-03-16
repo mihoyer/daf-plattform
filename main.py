@@ -61,7 +61,9 @@ async def index(request: Request):
 
 @app.get("/paket", response_class=HTMLResponse)
 async def paket(request: Request):
-    return templates.TemplateResponse("paket.html", {"request": request, "settings": settings})
+    # Testgruppen-Modus: Direktzugang gesperrt, nur via QR-Code (/k/{code})
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/", status_code=302)
 
 
 @app.get("/zahlung", response_class=HTMLResponse)
