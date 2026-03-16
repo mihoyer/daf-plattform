@@ -264,3 +264,194 @@ def _fehler_seite(titel: str, nachricht: str) -> str:
 </div>
 </body>
 </html>"""
+
+
+# ── Testgruppen-Dashboard ─────────────────────────────────────────────────────
+
+import csv
+import io
+import json as _json
+from fastapi.responses import StreamingResponse
+
+TESTGRUPPEN_PASSWORT = os.environ.get("TESTGRUPPE_PASSWORT", "testgruppe2024")
+
+def _prüfe_tg_auth(request: Request):
+    """Einfache Cookie-basierte Auth für Testgruppen-Dashboard."""
+    token = request.cookies.get("tg_auth")
+    if token != "tg_ok":
+        raise HTTPException(status_code=401, detail="Nicht autorisiert.")
+
+
+@router.post("/api/testgruppe/login")
+async def tg_login(request: Request):
+    """Login für Testgruppen-Dashboard."""
+    body = await request.json()
+    pw = body.get("passwort", "")
+    if pw != TESTGRUPPEN_PASSWORT:
+        raise HTTPException(status_code=401, detail="Falsches Passwort.")
+    from fastapi.responses import JSONResponse as JR
+    resp = JR({"ok": True})
+    resp.set_cookie("tg_auth", "tg_ok", httponly=True, samesite="strict", max_age=3600 * 12)
+    return resp
+
+
+@router.get("/api/testgruppe/uebersicht")
+async def tg_uebersicht(request: Request, db: AsyncSession = Depends(get_db)):
+    """Alle Testgruppen-Sessions mit Kandidaten-Code."""
+    _prüfe_tg_auth(request)
+
+    result = await db.execute(
+        select(TestSession)
+        .options(selectinload(TestSession.module))
+        .where(TestSession.stripe_payment_intent_id.like("kandidat:%"))
+        .order_by(TestSession.erstellt_am.desc())
+    )
+    sessions = result.scalars().all()
+
+    rows = []
+    for sess in sessions:
+        kandidat_code = ""
+        durchgang = ""
+        if sess.stripe_payment_intent_id:
+            teile = sess.stripe_payment_intent_id.split(":")
+            if len(teile) >= 2:
+                kandidat_code = teile[1]
+            if len(teile) >= 3:
+                durchgang = teile[2]
+
+        abgeschlossene = sum(1 for m in sess.module if m.status.value == "abgeschlossen")
+        rows.append({
+            "token": sess.token,
+            "kandidat_code": kandidat_code,
+            "durchgang": durchgang,
+            "status": sess.status.value,
+            "gesamt_niveau": sess.gesamt_niveau.value if sess.gesamt_niveau else "–",
+            "gesamt_score": round(sess.gesamt_score, 1) if sess.gesamt_score else None,
+            "module_abgeschlossen": abgeschlossene,
+            "module_gesamt": len(sess.module),
+            "erstellt_am": sess.erstellt_am.strftime("%d.%m.%Y %H:%M") if sess.erstellt_am else "–",
+            "abgeschlossen_am": sess.abgeschlossen_am.strftime("%d.%m.%Y %H:%M") if sess.abgeschlossen_am else "–",
+        })
+
+    return {"sessions": rows}
+
+
+@router.get("/api/testgruppe/detail/{token}")
+async def tg_detail(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Vollständige KI-Analyse einer Testgruppen-Session."""
+    _prüfe_tg_auth(request)
+
+    result = await db.execute(
+        select(TestSession)
+        .where(TestSession.token == token)
+        .options(selectinload(TestSession.module))
+    )
+    sess = result.scalar_one_or_none()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden.")
+
+    kandidat_code = ""
+    durchgang = ""
+    if sess.stripe_payment_intent_id and sess.stripe_payment_intent_id.startswith("kandidat:"):
+        teile = sess.stripe_payment_intent_id.split(":")
+        if len(teile) >= 2:
+            kandidat_code = teile[1]
+        if len(teile) >= 3:
+            durchgang = teile[2]
+
+    module_data = []
+    for m in sorted(sess.module, key=lambda x: x.reihenfolge):
+        analyse = {}
+        if m.ki_analyse_json:
+            try:
+                analyse = _json.loads(m.ki_analyse_json)
+            except Exception:
+                analyse = {}
+        module_data.append({
+            "modul": m.modul.value,
+            "status": m.status.value,
+            "cefr": m.cefr_niveau.value if m.cefr_niveau else "–",
+            "score": round(m.gesamt_score, 1) if m.gesamt_score else None,
+            "analyse": analyse,
+        })
+
+    return {
+        "token": sess.token,
+        "kandidat_code": kandidat_code,
+        "durchgang": durchgang,
+        "status": sess.status.value,
+        "gesamt_niveau": sess.gesamt_niveau.value if sess.gesamt_niveau else "–",
+        "gesamt_score": round(sess.gesamt_score, 1) if sess.gesamt_score else None,
+        "erstellt_am": sess.erstellt_am.strftime("%d.%m.%Y %H:%M") if sess.erstellt_am else "–",
+        "abgeschlossen_am": sess.abgeschlossen_am.strftime("%d.%m.%Y %H:%M") if sess.abgeschlossen_am else "–",
+        "module": module_data,
+    }
+
+
+@router.get("/api/testgruppe/csv")
+async def tg_csv_export(request: Request, db: AsyncSession = Depends(get_db)):
+    """CSV-Export aller Testgruppen-Ergebnisse."""
+    _prüfe_tg_auth(request)
+
+    result = await db.execute(
+        select(TestSession)
+        .options(selectinload(TestSession.module))
+        .where(TestSession.stripe_payment_intent_id.like("kandidat:%"))
+        .order_by(TestSession.erstellt_am.asc())
+    )
+    sessions = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";")
+
+    # Header
+    writer.writerow([
+        "Kandidat-Code", "Durchgang", "Status", "CEFR-Niveau", "Gesamt-Score (%)",
+        "M1 Grammatik CEFR", "M1 Score",
+        "M2 Lesen CEFR", "M2 Score",
+        "M3 Hörverstehen CEFR", "M3 Score",
+        "M4 Vorlesen CEFR", "M4 Score",
+        "M5 Sprechen CEFR", "M5 Score",
+        "M6 Schreiben CEFR", "M6 Score",
+        "Erstellt am", "Abgeschlossen am",
+    ])
+
+    modul_reihenfolge = ["m1_grammatik", "m2_lesen", "m3_hoerverstehen", "m4_vorlesen", "m5_sprechen", "m6_schreiben"]
+
+    for sess in sessions:
+        kandidat_code = ""
+        durchgang = ""
+        if sess.stripe_payment_intent_id:
+            teile = sess.stripe_payment_intent_id.split(":")
+            if len(teile) >= 2:
+                kandidat_code = teile[1]
+            if len(teile) >= 3:
+                durchgang = teile[2]
+
+        modul_map = {m.modul.value: m for m in sess.module}
+        modul_werte = []
+        for mk in modul_reihenfolge:
+            m = modul_map.get(mk)
+            if m:
+                modul_werte.append(m.cefr_niveau.value if m.cefr_niveau else "–")
+                modul_werte.append(str(round(m.gesamt_score, 1)) if m.gesamt_score else "–")
+            else:
+                modul_werte.extend(["–", "–"])
+
+        writer.writerow([
+            kandidat_code,
+            durchgang,
+            sess.status.value,
+            sess.gesamt_niveau.value if sess.gesamt_niveau else "–",
+            str(round(sess.gesamt_score, 1)) if sess.gesamt_score else "–",
+            *modul_werte,
+            sess.erstellt_am.strftime("%d.%m.%Y %H:%M") if sess.erstellt_am else "–",
+            sess.abgeschlossen_am.strftime("%d.%m.%Y %H:%M") if sess.abgeschlossen_am else "–",
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=testgruppe_ergebnisse.csv"},
+    )
