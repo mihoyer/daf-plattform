@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Testgruppen-Dashboard – DaF Sprachdiagnostik</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <style>
+    body { background: #f8fafc; }
+    .tg-header { background: #1e3a5f; color: white; padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; }
+    .tg-header h1 { font-size: 1.2rem; margin: 0; }
+    .tg-container { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .stat-card { background: white; border-radius: 10px; padding: 1.2rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); text-align: center; }
+    .stat-card .val { font-size: 2rem; font-weight: 700; color: #2563eb; }
+    .stat-card .lbl { font-size: .8rem; color: #64748b; margin-top: .2rem; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    th { background: #1e3a5f; color: white; padding: 10px 12px; text-align: left; font-size: .85rem; }
+    td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; font-size: .9rem; }
+    tr:hover td { background: #f8fafc; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: .75rem; font-weight: 600; }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-laufend { background: #fef9c3; color: #854d0e; }
+    .badge-offen { background: #f1f5f9; color: #475569; }
+    .badge-fehler { background: #fee2e2; color: #991b1b; }
+    .cefr { font-weight: 700; font-size: 1rem; }
+    .cefr-A1,.cefr-A2 { color: #dc2626; }
+    .cefr-B1,.cefr-B2 { color: #d97706; }
+    .cefr-C1,.cefr-C2 { color: #16a34a; }
+    .btn-detail { background: #2563eb; color: white; border: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: .8rem; text-decoration: none; }
+    .btn-detail:hover { background: #1d4ed8; }
+    .actions { display: flex; gap: 1rem; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap; }
+    .btn-csv { background: #16a34a; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: .9rem; text-decoration: none; display: inline-flex; align-items: center; gap: .4rem; }
+    .btn-csv:hover { background: #15803d; }
+    .btn-refresh { background: #64748b; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: .9rem; }
+    #login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .login-box { background: white; border-radius: 12px; padding: 2rem; width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,.2); }
+    .login-box h2 { margin: 0 0 1rem; font-size: 1.2rem; }
+    .login-box input { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 1rem; margin-bottom: 1rem; box-sizing: border-box; }
+    .login-box button { width: 100%; padding: 10px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; }
+    .login-box button:hover { background: #1d4ed8; }
+    .login-error { color: #dc2626; font-size: .85rem; margin-bottom: .5rem; display: none; }
+    #detail-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: flex-start; justify-content: center; z-index: 100; overflow-y: auto; padding: 2rem 1rem; }
+    .detail-box { background: white; border-radius: 12px; padding: 2rem; max-width: 800px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,.2); position: relative; }
+    .detail-close { position: absolute; top: 1rem; right: 1rem; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #64748b; }
+    .modul-section { border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .modul-title { font-weight: 700; font-size: 1rem; margin-bottom: .5rem; display: flex; align-items: center; gap: .5rem; }
+    .analyse-block { background: #f8fafc; border-radius: 6px; padding: .75rem; margin-top: .5rem; font-size: .85rem; }
+    .analyse-block h4 { margin: 0 0 .4rem; font-size: .85rem; color: #475569; }
+    .skill-table { width: 100%; border-collapse: collapse; font-size: .82rem; margin-top: .5rem; }
+    .skill-table th { background: #f1f5f9; padding: 5px 8px; text-align: left; }
+    .skill-table td { padding: 5px 8px; border-bottom: 1px solid #f1f5f9; }
+    .score-bar { display: inline-block; height: 6px; background: #2563eb; border-radius: 3px; vertical-align: middle; margin-left: 4px; }
+  </style>
+</head>
+<body>
+
+<!-- Login-Overlay -->
+<div id="login-overlay">
+  <div class="login-box">
+    <h2>🔒 Testgruppen-Dashboard</h2>
+    <p style="color:#64748b; font-size:.9rem; margin-bottom:1rem;">Bitte Passwort eingeben um fortzufahren.</p>
+    <div class="login-error" id="login-error">Falsches Passwort.</div>
+    <input type="password" id="login-pw" placeholder="Passwort" onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">Anmelden</button>
+  </div>
+</div>
+
+<!-- Detail-Overlay -->
+<div id="detail-overlay">
+  <div class="detail-box">
+    <button class="detail-close" onclick="schliesseDetail()">×</button>
+    <div id="detail-inhalt">Lädt…</div>
+  </div>
+</div>
+
+<div class="tg-header">
+  <h1>🎓 DaF Sprachdiagnostik – Testgruppen-Dashboard</h1>
+  <button onclick="logout()" style="background:rgba(255,255,255,.2); color:white; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:.85rem;">Abmelden</button>
+</div>
+
+<div class="tg-container">
+
+  <div class="stat-grid" id="stats">
+    <div class="stat-card"><div class="val" id="stat-total">–</div><div class="lbl">Tests gesamt</div></div>
+    <div class="stat-card"><div class="val" id="stat-abgeschlossen">–</div><div class="lbl">Abgeschlossen</div></div>
+    <div class="stat-card"><div class="val" id="stat-laufend">–</div><div class="lbl">Laufend</div></div>
+    <div class="stat-card"><div class="val" id="stat-avg">–</div><div class="lbl">Ø Score</div></div>
+  </div>
+
+  <div class="actions">
+    <a href="/api/testgruppe/csv" class="btn-csv" id="csv-btn">⬇ CSV exportieren</a>
+    <button class="btn-refresh" onclick="ladeUebersicht()">↻ Aktualisieren</button>
+    <span style="font-size:.8rem; color:#94a3b8;" id="letzte-aktualisierung"></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Kandidat</th>
+        <th>Durchgang</th>
+        <th>Status</th>
+        <th>CEFR</th>
+        <th>Score</th>
+        <th>Module</th>
+        <th>Abgeschlossen</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody id="tabelle-body">
+      <tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:2rem;">Lädt…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+let istEingeloggt = false;
+
+// ── Login ──────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const pw = document.getElementById('login-pw').value;
+  const err = document.getElementById('login-error');
+  err.style.display = 'none';
+  try {
+    const r = await fetch('/api/testgruppe/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({passwort: pw}),
+    });
+    if (!r.ok) { err.style.display = 'block'; return; }
+    document.getElementById('login-overlay').style.display = 'none';
+    istEingeloggt = true;
+    ladeUebersicht();
+  } catch(e) {
+    err.style.display = 'block';
+  }
+}
+
+function logout() {
+  document.cookie = 'tg_auth=; Max-Age=0; path=/';
+  location.reload();
+}
+
+// ── Übersicht laden ────────────────────────────────────────────────────────
+async function ladeUebersicht() {
+  try {
+    const r = await fetch('/api/testgruppe/uebersicht');
+    if (r.status === 401) { document.getElementById('login-overlay').style.display = 'flex'; return; }
+    const data = await r.json();
+    zeigeUebersicht(data.sessions);
+    document.getElementById('letzte-aktualisierung').textContent =
+      'Zuletzt: ' + new Date().toLocaleTimeString('de-DE');
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function zeigeUebersicht(sessions) {
+  // Statistiken
+  const total = sessions.length;
+  const abgeschlossen = sessions.filter(s => s.status === 'abgeschlossen').length;
+  const laufend = sessions.filter(s => s.status === 'laufend').length;
+  const scores = sessions.filter(s => s.gesamt_score).map(s => s.gesamt_score);
+  const avg = scores.length ? (scores.reduce((a,b) => a+b, 0) / scores.length).toFixed(1) : '–';
+
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-abgeschlossen').textContent = abgeschlossen;
+  document.getElementById('stat-laufend').textContent = laufend;
+  document.getElementById('stat-avg').textContent = avg !== '–' ? avg + '%' : '–';
+
+  // Tabelle
+  const tbody = document.getElementById('tabelle-body');
+  if (!sessions.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#94a3b8; padding:2rem;">Noch keine Testergebnisse vorhanden.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = sessions.map(s => {
+    const statusBadge = {
+      'abgeschlossen': '<span class="badge badge-ok">✓ Abgeschlossen</span>',
+      'laufend': '<span class="badge badge-laufend">⏳ Laufend</span>',
+      'offen': '<span class="badge badge-offen">○ Offen</span>',
+      'fehler': '<span class="badge badge-fehler">✗ Fehler</span>',
+    }[s.status] || s.status;
+
+    const cefrClass = s.gesamt_niveau !== '–' ? 'cefr cefr-' + s.gesamt_niveau : '';
+    const cefr = `<span class="${cefrClass}">${s.gesamt_niveau}</span>`;
+    const score = s.gesamt_score ? s.gesamt_score + '%' : '–';
+    const module = `${s.module_abgeschlossen}/${s.module_gesamt}`;
+    const detailBtn = s.status === 'abgeschlossen'
+      ? `<button class="btn-detail" onclick="zeigeDetail('${s.token}')">Detail →</button>`
+      : '<span style="color:#94a3b8; font-size:.8rem;">–</span>';
+
+    return `<tr>
+      <td><strong>${s.kandidat_code || '–'}</strong></td>
+      <td>${s.durchgang || '–'}</td>
+      <td>${statusBadge}</td>
+      <td>${cefr}</td>
+      <td>${score}</td>
+      <td>${module}</td>
+      <td style="font-size:.8rem; color:#64748b;">${s.abgeschlossen_am}</td>
+      <td>${detailBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Detail-Ansicht ─────────────────────────────────────────────────────────
+async function zeigeDetail(token) {
+  const overlay = document.getElementById('detail-overlay');
+  const inhalt = document.getElementById('detail-inhalt');
+  overlay.style.display = 'flex';
+  inhalt.innerHTML = '<p style="text-align:center; color:#94a3b8;">Lädt…</p>';
+
+  try {
+    const r = await fetch('/api/testgruppe/detail/' + token);
+    const d = await r.json();
+    inhalt.innerHTML = renderDetail(d);
+  } catch(e) {
+    inhalt.innerHTML = '<p style="color:#dc2626;">Fehler beim Laden.</p>';
+  }
+}
+
+function schliesseDetail() {
+  document.getElementById('detail-overlay').style.display = 'none';
+}
+
+function renderDetail(d) {
+  const modulNamen = {
+    'm1_grammatik': '📝 M1 – Grammatik & Wortschatz',
+    'm2_lesen': '📖 M2 – Lesen & Leseverstehen',
+    'm3_hoerverstehen': '🎧 M3 – Hörverstehen',
+    'm4_vorlesen': '🔊 M4 – Vorlesen',
+    'm5_sprechen': '🎙️ M5 – Freies Sprechen',
+    'm6_schreiben': '✍️ M6 – Schreiben',
+  };
+
+  let html = `
+    <h2 style="margin:0 0 1rem;">Kandidat: <strong>${d.kandidat_code}</strong> (Durchgang ${d.durchgang})</h2>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:.75rem; margin-bottom:1.5rem;">
+      <div class="stat-card" style="padding:.75rem;">
+        <div class="val" style="font-size:1.8rem;">${d.gesamt_niveau}</div>
+        <div class="lbl">CEFR-Niveau</div>
+      </div>
+      <div class="stat-card" style="padding:.75rem;">
+        <div class="val" style="font-size:1.8rem;">${d.gesamt_score ? d.gesamt_score + '%' : '–'}</div>
+        <div class="lbl">Gesamtscore</div>
+      </div>
+      <div class="stat-card" style="padding:.75rem;">
+        <div class="val" style="font-size:1rem; padding-top:.4rem;">${d.abgeschlossen_am}</div>
+        <div class="lbl">Abgeschlossen</div>
+      </div>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <a href="/ergebnis/${d.token}" target="_blank" class="btn-detail" style="margin-right:.5rem;">📊 Ergebnisseite</a>
+      <a href="/api/export/${d.token}/pdf" target="_blank" class="btn-detail" style="background:#64748b;">📄 PDF</a>
+    </div>
+  `;
+
+  for (const m of d.module) {
+    if (m.status !== 'abgeschlossen') continue;
+    const a = m.analyse || {};
+    html += `<div class="modul-section">
+      <div class="modul-title">
+        ${modulNamen[m.modul] || m.modul}
+        <span class="cefr cefr-${m.cefr}" style="margin-left:auto;">${m.cefr}</span>
+        <span style="color:#64748b; font-size:.85rem; font-weight:400;">${m.score ? m.score + '/10' : ''}</span>
+      </div>`;
+
+    // Gesamteinschätzung
+    const einschaetzung = a.gesamteinschaetzung || a.zusammenfassung || a.gesamtbewertung || a.bewertung || '';
+    if (einschaetzung) {
+      html += `<div class="analyse-block"><h4>Gesamteinschätzung</h4><p style="margin:0;">${einschaetzung}</p></div>`;
+    }
+
+    // Skills-Tabelle
+    const skills = a.skills || a.kategorien || a.kriterien || [];
+    if (skills.length) {
+      html += `<div class="analyse-block"><h4>Skill-Auswertung</h4>
+        <table class="skill-table"><thead><tr><th>Bereich</th><th>Score</th><th>Einschätzung</th></tr></thead><tbody>`;
+      for (const sk of skills) {
+        const name = sk.name || sk.kategorie || sk.bereich || '';
+        const score = sk.score || sk.punkte || sk.wert || '';
+        const komm = sk.kommentar || sk.beschreibung || sk.einschaetzung || '';
+        const barWidth = score ? Math.min(score * 10, 100) : 0;
+        html += `<tr>
+          <td>${name}</td>
+          <td>${score}<span class="score-bar" style="width:${barWidth}px;"></span></td>
+          <td style="color:#475569;">${komm}</td>
+        </tr>`;
+      }
+      html += `</tbody></table></div>`;
+    }
+
+    // Stärken / Schwächen
+    const staerken = a.staerken || a.stärken || [];
+    const schwaechen = a.schwaechen || a.schwächen || [];
+    if (staerken.length || schwaechen.length) {
+      html += `<div style="display:grid; grid-template-columns:1fr 1fr; gap:.75rem; margin-top:.5rem;">`;
+      if (staerken.length) {
+        html += `<div class="analyse-block"><h4>✓ Stärken</h4><ul style="margin:0; padding-left:1.2rem;">`;
+        staerken.forEach(s => { html += `<li>${s}</li>`; });
+        html += `</ul></div>`;
+      }
+      if (schwaechen.length) {
+        html += `<div class="analyse-block"><h4>⚠ Schwächen</h4><ul style="margin:0; padding-left:1.2rem;">`;
+        schwaechen.forEach(s => { html += `<li>${s}</li>`; });
+        html += `</ul></div>`;
+      }
+      html += `</div>`;
+    }
+
+    // Empfehlungen
+    const empfehlungen = a.empfehlungen || [];
+    if (empfehlungen.length) {
+      html += `<div class="analyse-block"><h4>💡 Empfehlungen</h4><ul style="margin:0; padding-left:1.2rem;">`;
+      empfehlungen.forEach(e => { html += `<li>${e}</li>`; });
+      html += `</ul></div>`;
+    }
+
+    // Aussprache (M4/M5)
+    const aussprache = a.aussprache || a.phonetik || null;
+    if (aussprache && typeof aussprache === 'object') {
+      html += `<div class="analyse-block"><h4>🔊 Aussprache-Analyse</h4>`;
+      for (const [k, v] of Object.entries(aussprache)) {
+        if (typeof v === 'string') html += `<p style="margin:.2rem 0;"><strong>${k}:</strong> ${v}</p>`;
+      }
+      html += `</div>`;
+    }
+
+    html += `</div>`;
+  }
+
+  return html;
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+// Prüfen ob bereits eingeloggt (Cookie vorhanden)
+(async function init() {
+  const r = await fetch('/api/testgruppe/uebersicht');
+  if (r.status === 401) {
+    document.getElementById('login-overlay').style.display = 'flex';
+  } else {
+    document.getElementById('login-overlay').style.display = 'none';
+    const data = await r.json();
+    zeigeUebersicht(data.sessions);
+    document.getElementById('letzte-aktualisierung').textContent =
+      'Zuletzt: ' + new Date().toLocaleTimeString('de-DE');
+  }
+})();
+
+// Alle 60 Sekunden automatisch aktualisieren
+setInterval(ladeUebersicht, 60000);
+</script>
+</body>
+</html>
