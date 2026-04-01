@@ -31,9 +31,21 @@
   <h2 class="mt-8 mb-4">1. Verantwortliche Stelle</h2>
   <p>Verantwortlich für den Betrieb dieser Plattform im Sinne der DSGVO ist:</p>
   <div class="card mt-3" id="impressum">
-    <p><strong>{{ betreiber_name }}</strong><br>
-    {{ betreiber_adresse }}<br>
-    E-Mail: {{ betreiber_email }}</p>
+    <p>
+      <strong>Mike Hoyer</strong><br>
+      Mühlepark 4<br>
+      8589 Bottighofen<br>
+      Schweiz<br><br>
+      E-Mail: <span id="email-verantwortlich"></span><br>
+      Telefon: +41 79 610 75 21
+    </p>
+    <script>
+      (function(){
+        var u='support',d='mikehoyer.de';
+        var el=document.getElementById('email-verantwortlich');
+        el.innerHTML='<a href="mailto:'+u+'@'+d+'">'+u+'&#64;'+d+'</a>';
+      })();
+    </script>
   </div>
 
   <h2 class="mt-8 mb-4">2. Grundsätze der Datenverarbeitung</h2>
@@ -116,7 +128,14 @@
     <li><strong>Recht auf Löschung</strong> (Art. 17 DSGVO) – Analysedaten werden automatisch nach 24 Stunden gelöscht.</li>
     <li><strong>Beschwerderecht</strong> bei der zuständigen Datenschutzbehörde</li>
   </ul>
-  <p class="mt-2">Für Anfragen wenden Sie sich an: <a href="mailto:{{ betreiber_email }}">{{ betreiber_email }}</a></p>
+  <p class="mt-2">Für Anfragen wenden Sie sich an: <span id="email-anfragen"></span></p>
+  <script>
+    (function(){
+      var u='support',d='mikehoyer.de';
+      var el=document.getElementById('email-anfragen');
+      el.innerHTML='<a href="mailto:'+u+'@'+d+'">'+u+'&#64;'+d+'</a>';
+    })();
+  </script>
 
   <h2 class="mt-8 mb-4">7. Datensicherheit</h2>
   <p>Die Übertragung aller Daten erfolgt ausschließlich über <strong>HTTPS/TLS</strong>.
@@ -129,9 +148,21 @@
 
   <div class="card mt-8" style="background:var(--gray-50);">
     <h3 class="mb-2" id="impressum">Impressum</h3>
-    <p class="text-sm"><strong>{{ betreiber_name }}</strong><br>
-    {{ betreiber_adresse }}<br>
-    E-Mail: <a href="mailto:{{ betreiber_email }}">{{ betreiber_email }}</a></p>
+    <p class="text-sm">
+      <strong>Mike Hoyer</strong><br>
+      Mühlepark 4<br>
+      8589 Bottighofen<br>
+      Schweiz<br><br>
+      E-Mail: <span id="email-impressum"></span><br>
+      Telefon: +41 79 610 75 21
+    </p>
+    <script>
+      (function(){
+        var u='support',d='mikehoyer.de';
+        var el=document.getElementById('email-impressum');
+        el.innerHTML='<a href="mailto:'+u+'@'+d+'">'+u+'&#64;'+d+'</a>';
+      })();
+    </script>
   </div>
 </div>
 

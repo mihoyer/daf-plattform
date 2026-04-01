@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Einstufungsbericht – DaF Sprachdiagnostik</title>
+  <title>Einstufungsbericht – DaF/DaZ Sprachdiagnostik</title>
   <link rel="stylesheet" href="/static/css/main.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <nav class="navbar">
   <div class="navbar-inner">
-    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF/DaZ Sprachdiagnostik</a>
     <div class="flex gap-2" id="export-buttons"></div>
   </div>
 </nav>
@@ -152,8 +152,9 @@ function zeigeBericht(data) {
   const score = Math.round(data.gesamt_score || data.gesamtscore || 0);
   document.getElementById('gesamtscore').textContent = score;
   const bar = document.getElementById('gesamtscore-bar');
-  bar.style.width = score + '%';
   bar.className = `score-bar-fill ${scoreKlasse(score)}`;
+  bar.style.width = '0%';
+  requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = score + '%'; }));
 
   // CEFR – Backend liefert 'gesamt_niveau'
   const cefr = data.gesamt_niveau || data.cefr_niveau || '–';
@@ -252,7 +253,7 @@ function zeigeBericht(data) {
                 <span class="text-xs font-bold" style="text-transform:capitalize;">${s.name.replace(/_/g,' ')}</span>
                 <span class="text-xs font-bold" style="color:${s.score >= 7 ? 'var(--success)' : s.score >= 4 ? 'var(--warning)' : 'var(--danger)'}">${s.score}/10</span>
               </div>
-              <div class="score-bar" style="height:4px;"><div class="score-bar-fill ${scoreKlasse(s.score * 10)}" style="width:${s.score * 10}%"></div></div>
+              <div class="score-bar" style="height:4px;"><div class="score-bar-fill ${scoreKlasse(s.score * 10)}" style="width:0%" data-width="${s.score * 10}%"></div></div>
               ${s.begruendung ? `<p class="text-xs text-muted mt-1">${s.begruendung}</p>` : ''}
             </div>
           `).join('')}
@@ -308,10 +309,9 @@ function zeigeBericht(data) {
           <h3>${MODUL_NAMEN[modul.modul] || modul.modul}</h3>
           <div class="flex items-center gap-2">
             <span class="badge badge-gray">${modul.cefr || ''}</span>
-            <span style="font-size:1.3rem; font-weight:800; color:${modulScore >= 70 ? 'var(--success)' : modulScore >= 40 ? 'var(--warning)' : 'var(--danger)'}">${modulScore}/100</span>
-          </div>
+            <span style="font-size:1.3rem; font-weight:800; color:${modulScore >= 70 ? 'var(--success)' : modulScore >= 40 ? 'var(--warning)' : 'var(--danger)'}">${modulScore}/100</span>          </div>
         </div>
-        <div class="score-bar mb-3"><div class="score-bar-fill ${scoreKlasse(modulScore)}" style="width:${modulScore}%"></div></div>
+        <div class="score-bar mb-3"><div class="modul-bar score-bar-fill ${scoreKlasse(modulScore)}" style="width:0%"></div></div>
         ${einschaetzung ? `<p class="text-sm text-muted mb-3">${einschaetzung}</p>` : ''}
         ${staerken.length ? `<p class="text-sm mb-1"><span style="color:var(--success);">✓ Stärken:</span> ${staerken.join(' · ')}</p>` : ''}
         ${schwaechen.length ? `<p class="text-sm mb-1"><span style="color:var(--warning);">→ Verbesserung:</span> ${schwaechen.join(' · ')}</p>` : ''}
@@ -322,6 +322,23 @@ function zeigeBericht(data) {
       `;
       moduleEl.appendChild(div);
     });
+    // Modul-Balken animieren nach Paint
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      moduleEl.querySelectorAll('.modul-bar').forEach(el => {
+        el.style.width = el.dataset.score || el.style.width;
+      });
+      // Modul-Balken: Score aus Klasse ableiten
+      module.forEach((modul, idx) => {
+        const modulScore = Math.round(modul.score || 0);
+        const bars = moduleEl.querySelectorAll('.modul-bar');
+        if (bars[idx]) bars[idx].style.width = modulScore + '%';
+      });
+      // Skill-Balken (Unterkategorien)
+      moduleEl.querySelectorAll('.score-bar-fill:not(.modul-bar)').forEach(el => {
+        const w = el.getAttribute('data-width');
+        if (w) el.style.width = w;
+      });
+    }));
   }
 
   // Export-Links
@@ -346,24 +363,42 @@ function zeigeVisualisierungen(module) {
   };
 
   const labels = [];
-  const scores = [];
+  const scores = [];    // CEFR-Werte (1–6) für Radar
+  const rawScores = []; // Original-Scores (0–100) für Balken
   const farben = [];
+
+  // CEFR-Niveau zu numerischem Wert (1–6)
+  const CEFR_WERT = { 'A1': 1, 'A2': 2, 'B1': 3, 'B2': 4, 'C1': 5, 'C2': 6 };
+  const CEFR_FARBE = { 1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#22c55e', 5: '#3b82f6', 6: '#8b5cf6' };
+
+  // Score (0–100) zu CEFR-Wert umrechnen
+  function scoreToCEFR(score) {
+    if (score >= 90) return 6;  // C2
+    if (score >= 75) return 5;  // C1
+    if (score >= 58) return 4;  // B2
+    if (score >= 42) return 3;  // B1
+    if (score >= 25) return 2;  // A2
+    return 1;                   // A1
+  }
 
   module.forEach(m => {
     const name = MODUL_NAMEN_KURZ[m.modul] || m.modul;
     let score = Math.round(m.score || 0);
-    // Normalisieren: Scores ≤15 sind wahrscheinlich 0-10 Skala
     if (score <= 15) score = score * 10;
     score = Math.min(100, score);
+    // CEFR-Wert bevorzugt aus m.cefr, sonst aus Score ableiten
+    const cefrStr = m.cefr || '';
+    const cefrVal = CEFR_WERT[cefrStr] || scoreToCEFR(score);
     labels.push(name);
-    scores.push(score);
-    farben.push(score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444');
+    scores.push(cefrVal);     // für Radar
+    rawScores.push(score);    // für Balken
+    farben.push(CEFR_FARBE[cefrVal] || '#6b7280');
   });
 
   if (labels.length < 2) return;
   document.getElementById('viz-bereich').classList.remove('hidden');
 
-  // Spinnennetz-Diagramm
+  // Spinnennetz-Diagramm mit CEFR-Achse
   const ctx = document.getElementById('radar-chart').getContext('2d');
   new Chart(ctx, {
     type: 'radar',
@@ -376,28 +411,47 @@ function zeigeVisualisierungen(module) {
         borderColor: 'rgba(37, 99, 235, 0.8)',
         borderWidth: 2,
         pointBackgroundColor: farben,
-        pointRadius: 5,
+        pointRadius: 6,
+        pointHoverRadius: 8,
       }]
     },
     options: {
       responsive: true,
       scales: {
         r: {
-          min: 0, max: 100,
-          ticks: { stepSize: 20, font: { size: 10 } },
-          pointLabels: { font: { size: 12, weight: 'bold' } },
+          min: 0, max: 6,
+          ticks: {
+            stepSize: 1,
+            font: { size: 10, weight: 'bold' },
+            color: '#374151',
+            backdropColor: 'rgba(255,255,255,0.85)',
+            callback: (val) => ['', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'][val] || ''
+          },
+          pointLabels: { font: { size: 12, weight: 'bold' }, color: '#1a2744' },
           grid: { color: 'rgba(0,0,0,0.08)' },
+          angleLines: { color: 'rgba(0,0,0,0.1)' },
         }
       },
-      plugins: { legend: { display: false } }
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const niveaus = ['', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+              return ' Niveau: ' + (niveaus[ctx.raw] || ctx.raw);
+            }
+          }
+        }
+      }
     }
   });
 
-  // Fortschrittsbalken
+  // Fortschrittsbalken – width erst nach rAF setzen damit CSS-Transition sichtbar ist
   const balkenEl = document.getElementById('balken-bereich');
+  const balkenFills = [];
   labels.forEach((label, i) => {
-    const score = scores[i];
-    const farbe = score >= 70 ? 'var(--success)' : score >= 40 ? 'var(--warning)' : 'var(--danger)';
+    const rawScore = rawScores[i]; // Original-Score 0–100 für Balken
+    const farbe = rawScore >= 70 ? 'var(--success)' : rawScore >= 40 ? 'var(--warning)' : 'var(--danger)';
     const cefr = module[i].cefr || '';
     const div = document.createElement('div');
     div.innerHTML = `
@@ -405,15 +459,20 @@ function zeigeVisualisierungen(module) {
         <span class="text-sm font-bold">${label}</span>
         <div class="flex items-center gap-2">
           ${cefr ? `<span class="badge badge-gray" style="font-size:.7rem;">${cefr}</span>` : ''}
-          <span class="text-sm font-bold" style="color:${farbe};">${score}/100</span>
+          <span class="text-sm font-bold" style="color:${farbe};">${rawScore}/100</span>
         </div>
       </div>
       <div style="background:#f3f4f6; border-radius:999px; height:10px; overflow:hidden;">
-        <div style="height:100%; width:${score}%; background:${farbe}; border-radius:999px; transition:width 1s ease;"></div>
+        <div class="bar-fill" style="height:100%; width:0%; background:${farbe}; border-radius:999px; transition:width 1s ease;"></div>
       </div>
     `;
     balkenEl.appendChild(div);
+    balkenFills.push({ el: div.querySelector('.bar-fill'), score: rawScore });
   });
+  // Trigger animation after paint
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    balkenFills.forEach(({ el, score }) => { el.style.width = score + '%'; });
+  }));
 }
 
 ladeBericht();

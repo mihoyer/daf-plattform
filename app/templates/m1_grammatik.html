@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>M1 Grammatik & Wortschatz – DaF Sprachdiagnostik</title>
+  <title>M1 Grammatik & Wortschatz – DaF/DaZ Sprachdiagnostik</title>
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
 <nav class="navbar">
   <div class="navbar-inner">
-    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF/DaZ Sprachdiagnostik</a>
     <div class="badge badge-primary">📝 M1 – Grammatik &amp; Wortschatz</div>
   </div>
 </nav>
@@ -60,7 +60,7 @@
 
     <!-- Weiter-Button -->
     <div class="flex justify-end mt-4">
-      <button class="btn btn-primary" id="btn-weiter" onclick="weiter()" disabled>Antwort wählen →</button>
+      <button class="btn btn-primary" id="btn-weiter" onclick="weiter()" disabled>Antwort eingeben →</button>
     </div>
   </div>
 
@@ -74,17 +74,49 @@
   </div>
 </div>
 
+<style>
+.lueckentext-input {
+  display: inline-block;
+  border: none;
+  border-bottom: 2px solid var(--primary);
+  background: transparent;
+  font-size: 1.1rem;
+  font-family: inherit;
+  padding: 2px 8px;
+  min-width: 120px;
+  width: 160px;
+  text-align: center;
+  outline: none;
+  color: var(--gray-900);
+  transition: border-color 0.2s;
+}
+.lueckentext-input:focus {
+  border-bottom-color: var(--primary-dark, #2563eb);
+}
+.lueckentext-input:disabled {
+  color: var(--gray-600);
+  border-bottom-color: var(--gray-300);
+}
+.lueckentext-input.korrekt {
+  border-bottom-color: #22c55e;
+  color: #15803d;
+}
+.lueckentext-input.falsch {
+  border-bottom-color: #ef4444;
+  color: #b91c1c;
+}
+</style>
+
 <script>
 const token = '{{ token }}';
 const GESAMT_FRAGEN = 10;
 
 // Zustand
-let alleFragen = [];          // alle bisher gezeigten Fragen
-let antworten = {};           // {item_id: gewaehlter_index}
-let aktuelleFrageIdx = 0;    // Index in alleFragen (0-basiert)
-let gewaehltOption = null;    // aktuell gewählte Option
+let alleFragen = [];
+let antworten = {};           // {item_id: eingegebener_text}
+let aktuelleFrageIdx = 0;
+let eingabeAktiv = true;
 let geschaetztesNiveau = 'B1';
-let phase = 'einstieg';       // 'einstieg' | 'adaptiv' | 'fertig'
 let wartendAufNaechste = false;
 
 // ── Start ──────────────────────────────────────────────────────────────────
@@ -114,10 +146,10 @@ function zeigeAktuelleFrage() {
   const frage = alleFragen[aktuelleFrageIdx];
   if (!frage) return;
 
-  gewaehltOption = null;
+  eingabeAktiv = true;
   document.getElementById('feedback-bereich').classList.add('hidden');
   document.getElementById('btn-weiter').disabled = true;
-  document.getElementById('btn-weiter').textContent = 'Antwort wählen →';
+  document.getElementById('btn-weiter').textContent = 'Antwort eingeben →';
 
   // Fortschritt
   const frageNr = aktuelleFrageIdx + 1;
@@ -131,98 +163,161 @@ function zeigeAktuelleFrage() {
     niveauBadge.textContent = `Niveau: ${geschaetztesNiveau}`;
   }
 
-  // Frage-Karte rendern
-  const container = document.getElementById('frage-container');
+  // Lückentext aufbauen: _____ durch Eingabefeld ersetzen
+  const satz = frage.frage;
   const bereitsBeantwortet = antworten[frage.id] !== undefined;
-  const gewaehlt = antworten[frage.id] ?? null;
+  const gespeicherteAntwort = antworten[frage.id] ?? '';
 
+  // Satz mit Lücke in HTML umwandeln
+  const satzHtml = satz.replace('_____', `<input
+    type="text"
+    id="luecken-input"
+    class="lueckentext-input"
+    placeholder="…"
+    autocomplete="off"
+    autocorrect="off"
+    autocapitalize="none"
+    spellcheck="false"
+    style="text-transform:none;"
+    value="${bereitsBeantwortet ? escapeHtml(gespeicherteAntwort) : ''}"
+    ${bereitsBeantwortet ? 'disabled' : ''}
+    oninput="onEingabe(this)"
+    onkeydown="onKeyDown(event)"
+  >`);
+
+  const container = document.getElementById('frage-container');
   container.innerHTML = `
     <div class="card">
       <div class="text-xs text-muted mb-3" style="display:flex; gap:.5rem; align-items:center;">
         <span>Frage ${frageNr}</span>
         ${frage.thema ? `<span style="background:var(--primary-lighter); padding:2px 8px; border-radius:12px;">${frage.thema}</span>` : ''}
       </div>
-      <h3 class="mb-5" style="font-size:1.15rem; line-height:1.6;">${frage.frage}</h3>
-      <div id="optionen-liste">
-        ${frage.optionen.map((opt, i) => `
-          <label class="mc-option ${bereitsBeantwortet && gewaehlt === i ? 'selected' : ''}"
-                 onclick="${bereitsBeantwortet ? '' : `waehleAntwort(${i})`}"
-                 style="${bereitsBeantwortet ? 'cursor:default;' : ''}">
-            <input type="radio" name="antwort" value="${i}" ${bereitsBeantwortet && gewaehlt === i ? 'checked' : ''} ${bereitsBeantwortet ? 'disabled' : ''}>
-            <span class="option-buchstabe">${['A','B','C','D'][i]}</span>
-            ${opt}
-          </label>
-        `).join('')}
-      </div>
+      <p class="text-sm text-muted mb-3">Ergänze die fehlende Wortform im Lückentext:</p>
+      <h3 class="mb-5" style="font-size:1.15rem; line-height:2;">${satzHtml}</h3>
     </div>
   `;
 
-  // Wenn bereits beantwortet: Feedback sofort zeigen
+  // Wenn bereits beantwortet: Feedback sofort zeigen und Input färben
   if (bereitsBeantwortet) {
-    const istKorrekt = gewaehlt === frage.korrekt;
-    zeigeFeedback(istKorrekt, frage.erklaerung, frage.optionen[frage.korrekt]);
+    const istKorrekt = pruefeAntwort(gespeicherteAntwort, frage);
+    const inputEl = document.getElementById('luecken-input');
+    if (inputEl) {
+      inputEl.classList.add(istKorrekt ? 'korrekt' : 'falsch');
+    }
+    zeigeFeedback(istKorrekt, frage.erklaerung, frage.korrekte_antwort_text || frage.optionen?.[frage.korrekt] || '');
     document.getElementById('btn-weiter').disabled = false;
     document.getElementById('btn-weiter').textContent =
       aktuelleFrageIdx < GESAMT_FRAGEN - 1 ? 'Weiter →' : 'Auswertung starten →';
+  } else {
+    // Fokus auf das Eingabefeld setzen
+    setTimeout(() => {
+      const inputEl = document.getElementById('luecken-input');
+      if (inputEl) inputEl.focus();
+    }, 100);
   }
 }
 
-// ── Antwort wählen ─────────────────────────────────────────────────────────
+// ── Eingabe-Handler ────────────────────────────────────────────────────────
 
-async function waehleAntwort(optionIdx) {
-  if (gewaehltOption !== null || wartendAufNaechste) return;
-  gewaehltOption = optionIdx;
+function onEingabe(inputEl) {
+  const val = inputEl.value.trim();
+  const btn = document.getElementById('btn-weiter');
+  btn.disabled = val.length === 0;
+  if (val.length > 0) {
+    btn.textContent = 'Antwort prüfen →';
+  } else {
+    btn.textContent = 'Antwort eingeben →';
+  }
+}
+
+function onKeyDown(event) {
+  if (event.key === 'Enter') {
+    const btn = document.getElementById('btn-weiter');
+    if (!btn.disabled) {
+      pruefeUndWeiter();
+    }
+  }
+}
+
+// ── Antwort prüfen ─────────────────────────────────────────────────────────
+
+function pruefeAntwort(eingabe, frage) {
+  const korrektText = (frage.korrekte_antwort_text || frage.optionen?.[frage.korrekt] || '').trim().toLowerCase();
+  const eingabeNorm = eingabe.trim().toLowerCase();
+  return eingabeNorm === korrektText;
+}
+
+async function pruefeUndWeiter() {
+  if (!eingabeAktiv || wartendAufNaechste) return;
+
+  const inputEl = document.getElementById('luecken-input');
+  if (!inputEl) return;
+
+  const eingabe = inputEl.value.trim();
+  if (!eingabe) return;
+
+  eingabeAktiv = false;
+  inputEl.disabled = true;
 
   const frage = alleFragen[aktuelleFrageIdx];
-  antworten[frage.id] = optionIdx;
+  antworten[frage.id] = eingabe;
 
-  // Gewählte Option markieren
-  document.querySelectorAll('.mc-option').forEach((el, i) => {
-    el.classList.toggle('selected', i === optionIdx);
-    el.style.cursor = 'default';
-    el.onclick = null;
-  });
-
-  const istKorrekt = optionIdx === frage.korrekt;
+  const istKorrekt = pruefeAntwort(eingabe, frage);
+  const korrektText = frage.korrekte_antwort_text || frage.optionen?.[frage.korrekt] || '';
   const istLetzte = aktuelleFrageIdx >= GESAMT_FRAGEN - 1;
-  const istEinstiegsphase = aktuelleFrageIdx < alleFragen.length - 1;
+  // Nächste Frage im Hintergrund laden, wenn:
+  // - nicht die letzte Frage
+  // - wir noch keine Frage für den nächsten Index haben
+  const naechsterIdx = aktuelleFrageIdx + 1;
+  const naechsteFehlt = naechsterIdx >= alleFragen.length;
 
-  // 1. Feedback SOFORT anzeigen
-  zeigeFeedback(istKorrekt, frage.erklaerung, frage.optionen[frage.korrekt]);
+  // Input einfärben
+  inputEl.classList.add(istKorrekt ? 'korrekt' : 'falsch');
 
-  // 2. Weiter-Button sofort aktivieren (mit Ladehinweis falls nächste Frage noch fehlt)
+  // 1. Feedback sofort anzeigen
+  zeigeFeedback(istKorrekt, frage.erklaerung, korrektText);
+
+  // 2. Weiter-Button aktivieren
   document.getElementById('btn-weiter').disabled = false;
   document.getElementById('btn-weiter').textContent =
     istLetzte ? 'Auswertung starten →' : 'Weiter →';
 
-  // 3. Nächste Frage PARALLEL im Hintergrund laden (ohne den Nutzer zu blockieren)
-  if (!istLetzte && !istEinstiegsphase) {
+  // 3. Nächste Frage parallel im Hintergrund laden (immer, wenn sie noch fehlt)
+  if (!istLetzte && naechsteFehlt) {
     wartendAufNaechste = true;
-    // Weiter-Button zeigt Ladeindikator wenn Nutzer zu schnell klickt
     const btnWeiter = document.getElementById('btn-weiter');
+
+    const gewaehltIdx = istKorrekt ? frage.korrekt : (frage.korrekt === 0 ? 1 : 0);
 
     fetch(`/api/m1/${token}/naechste`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item_id: frage.id, gewaehlt: optionIdx }),
+      body: JSON.stringify({ item_id: frage.id, gewaehlt: gewaehltIdx }),
     })
-    .then(r => r.json())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(data => {
-      alleFragen.push(data.frage);
-      geschaetztesNiveau = data.geschaetztes_niveau || geschaetztesNiveau;
+      if (data.frage) {
+        alleFragen.push(data.frage);
+        geschaetztesNiveau = data.geschaetztes_niveau || geschaetztesNiveau;
+      }
       wartendAufNaechste = false;
-      // Falls Nutzer bereits auf Weiter gewartet hat: jetzt entsperren
       if (btnWeiter.dataset.wartet === '1') {
         btnWeiter.dataset.wartet = '0';
         btnWeiter.disabled = false;
         btnWeiter.textContent = 'Weiter →';
         aktuelleFrageIdx++;
-        zeigeAktuelleFrage();
+        zeigeAktuelleFrage(); // setzt auch den frage-container neu
       }
     })
     .catch(e => {
       console.error('Fehler beim Laden der nächsten Frage:', e);
       wartendAufNaechste = false;
+      // Trotz Fehler: Weiter-Button reaktivieren
+      if (btnWeiter.dataset.wartet === '1') {
+        btnWeiter.dataset.wartet = '0';
+        btnWeiter.disabled = false;
+        btnWeiter.textContent = 'Weiter →';
+      }
     });
   }
 }
@@ -237,7 +332,7 @@ function zeigeFeedback(istKorrekt, erklaerung, korrektText) {
   karte.style.borderLeftColor = istKorrekt ? '#22c55e' : '#ef4444';
   text.innerHTML = istKorrekt
     ? `<strong style="color:#22c55e;">✓ Richtig!</strong> ${erklaerung || ''}`
-    : `<strong style="color:#ef4444;">✗ Leider falsch.</strong> Die richtige Antwort ist: <strong>${korrektText}</strong>. ${erklaerung || ''}`;
+    : `<strong style="color:#ef4444;">✗ Leider falsch.</strong> Die richtige Antwort ist: <strong>${escapeHtml(korrektText)}</strong>. ${erklaerung || ''}`;
 
   bereich.classList.remove('hidden');
 }
@@ -245,6 +340,12 @@ function zeigeFeedback(istKorrekt, erklaerung, korrektText) {
 // ── Navigation ─────────────────────────────────────────────────────────────
 
 async function weiter() {
+  // Wurde noch keine Antwort geprüft? Dann jetzt prüfen.
+  if (eingabeAktiv) {
+    await pruefeUndWeiter();
+    return;
+  }
+
   if (aktuelleFrageIdx >= GESAMT_FRAGEN - 1) {
     await sendeEndauswertung();
     return;
@@ -252,19 +353,24 @@ async function weiter() {
 
   const naechsterIdx = aktuelleFrageIdx + 1;
 
-  // Nächste Frage bereits vorhanden? Sofort zeigen.
   if (naechsterIdx < alleFragen.length) {
     aktuelleFrageIdx = naechsterIdx;
     zeigeAktuelleFrage();
     return;
   }
 
-  // Nächste Frage wird noch generiert: Button sperren und warten
+  // Nächste Frage wird noch generiert – Spinner anzeigen
   const btn = document.getElementById('btn-weiter');
   btn.disabled = true;
-  btn.textContent = 'Nächste Frage wird generiert…';
+  btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:.5rem;"></span>Frage wird generiert…';
   btn.dataset.wartet = '1';
-  // Die .then()-Kette in waehleAntwort() wird den Button entsperren und weiternavigieren
+  // Frage-Container mit Lade-Hinweis ersetzen
+  document.getElementById('frage-container').innerHTML = `
+    <div class="card" style="text-align:center; padding:2rem;">
+      <div class="spinner" style="margin:0 auto 1rem;"></div>
+      <p class="text-muted">Nächste Frage wird generiert…</p>
+    </div>
+  `;
 }
 
 // ── Endauswertung ──────────────────────────────────────────────────────────
@@ -272,11 +378,14 @@ async function weiter() {
 async function sendeEndauswertung() {
   document.getElementById('analyse-overlay').classList.remove('hidden');
 
-  // Antworten als {item_id_string: option_index}
+  // Antworten als {item_id_string: option_index} – für Kompatibilität mit Backend
+  // korrekt = Index der richtigen Antwort, falsch = anderer Index
   const antwortenPayload = {};
   alleFragen.forEach(f => {
     if (antworten[f.id] !== undefined) {
-      antwortenPayload[String(f.id)] = antworten[f.id];
+      const eingabe = antworten[f.id];
+      const istKorrekt = pruefeAntwort(eingabe, f);
+      antwortenPayload[String(f.id)] = istKorrekt ? f.korrekt : (f.korrekt === 0 ? 1 : 0);
     }
   });
 
@@ -305,6 +414,16 @@ async function naechstesModul() {
     if (naechstes) return `/${naechstes.modul.split('_')[0]}/${token}`;
   } catch(e) {}
   return null;
+}
+
+// ── Hilfsfunktionen ────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────

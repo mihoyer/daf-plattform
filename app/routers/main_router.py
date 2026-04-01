@@ -5,7 +5,7 @@ import json
 import os
 import secrets
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -35,12 +35,44 @@ def _get_modul(sess, modul_typ: ModulTyp) -> Optional[ModulErgebnis]:
 
 
 def _score_to_cefr(score: float) -> str:
-    if score >= 90: return "C2"
-    if score >= 78: return "C1"
-    if score >= 65: return "B2"
-    if score >= 50: return "B1"
-    if score >= 35: return "A2"
+    """Leitet CEFR-Niveau aus absolutem Score (0-100) ab."""
+    if score >= 80: return "C1"
+    if score >= 60: return "B2"
+    if score >= 35: return "B1"
+    if score >= 15: return "A2"
     return "A1"
+
+
+# Absolute Score-Skala (0-100) – Niveaugrenzen
+# A1: 0–14 | A2: 15–34 | B1: 35–59 | B2: 60–79 | C1/C2: 80–100
+_CEFR_ABSOLUT_BEREICHE = {
+    "A1": (0,  14),
+    "A2": (15, 34),
+    "B1": (35, 59),
+    "B2": (60, 79),
+    "C1": (80, 92),
+    "C2": (93, 100),
+}
+
+
+def cefr_relativer_zu_absolut(relativer_score: float, cefr: str) -> float:
+    """
+    Wandelt einen relativen Modul-Score (0-100) in einen absoluten Score (0-100) um.
+
+    Das CEFR-Niveau bestimmt den Bereich auf der absoluten Skala.
+    Der relative Score bestimmt die Position innerhalb dieses Bereichs.
+
+    Beispiel: cefr='B1', relativer_score=72 → absolut = 35 + (72/100 * 24) = 52.3
+    """
+    cefr = cefr.upper().strip() if cefr else "B1"
+    # C2 auf C1 mappen falls nötig
+    if cefr not in _CEFR_ABSOLUT_BEREICHE:
+        cefr = "B1"
+    untergrenze, obergrenze = _CEFR_ABSOLUT_BEREICHE[cefr]
+    breite = obergrenze - untergrenze
+    # relativer_score (0-100) auf den Bereich projizieren
+    absolut = untergrenze + (max(0.0, min(100.0, relativer_score)) / 100.0) * breite
+    return round(absolut, 1)
 
 
 # ── Session ──────────────────────────────────────────────────────────────────
@@ -75,6 +107,7 @@ async def erstelle_session(
     if zahlungs_status == ZahlungsStatus.bezahlt:
         sess.zahlungs_status = ZahlungsStatus.bezahlt
         sess.status = SessionStatus.laufend
+        sess.laeuft_ab_am = datetime.now(timezone.utc) + timedelta(hours=2)
         await db.commit()
 
     return {"token": sess.token, "paket": paket_enum.value, "zahlungs_status": zahlungs_status.value}
@@ -288,13 +321,14 @@ async def m1_submit(token: str, request: Request, db: AsyncSession = Depends(get
     auswertung = await m1_service.werte_aus(alle_fragen, antworten)
 
     modul.set_ki_analyse(auswertung)
-    modul.gesamt_score = auswertung["score"]
+    modul.gesamt_score = cefr_relativer_zu_absolut(auswertung["score"], auswertung["cefr"])
     modul.cefr_niveau = CEFRNiveau(auswertung["cefr"])
     modul.status = ModulStatus.abgeschlossen
     modul.abgeschlossen_am = datetime.now(timezone.utc)
 
     sess.grob_niveau = CEFRNiveau(auswertung["cefr"])
     sess.status = SessionStatus.laufend
+    sess.laeuft_ab_am = datetime.now(timezone.utc) + timedelta(hours=2)
     await db.commit()
 
     if sess.alle_abgeschlossen():
@@ -348,10 +382,11 @@ async def m2_submit(token: str, request: Request, db: AsyncSession = Depends(get
     )
 
     modul.set_ki_analyse(auswertung)
-    modul.gesamt_score = auswertung["score"]
+    modul.gesamt_score = cefr_relativer_zu_absolut(auswertung["score"], auswertung["cefr"])
     modul.cefr_niveau = CEFRNiveau(auswertung["cefr"])
     modul.status = ModulStatus.abgeschlossen
     modul.abgeschlossen_am = datetime.now(timezone.utc)
+    sess.laeuft_ab_am = datetime.now(timezone.utc) + timedelta(hours=2)
     await db.commit()
 
     if sess.alle_abgeschlossen():
@@ -403,10 +438,11 @@ async def m3_submit(token: str, request: Request, db: AsyncSession = Depends(get
     auswertung = await openai_service.analysiere_hoerverstehen(fragen, antworten, modul.schwierigkeitsgrad or "B1")
 
     modul.set_ki_analyse(auswertung)
-    modul.gesamt_score = auswertung["score"]
+    modul.gesamt_score = cefr_relativer_zu_absolut(auswertung["score"], auswertung["cefr"])
     modul.cefr_niveau = CEFRNiveau(auswertung["cefr"])
     modul.status = ModulStatus.abgeschlossen
     modul.abgeschlossen_am = datetime.now(timezone.utc)
+    sess.laeuft_ab_am = datetime.now(timezone.utc) + timedelta(hours=2)
     await db.commit()
 
     if sess.alle_abgeschlossen():
@@ -439,11 +475,11 @@ async def m4_text(token: str, db: AsyncSession = Depends(get_db)):
     niveau = sess.grob_niveau.value if sess.grob_niveau else "B1"
     import random
     themen_pool = {
-        "A1": ["Familie", "Essen", "Tiere", "Farben", "Schule"],
-        "A2": ["Freizeit", "Einkaufen", "Wetter", "Reisen", "Arbeit"],
-        "B1": ["Umwelt", "Technologie", "Gesundheit", "Kultur", "Sport"],
-        "B2": ["Klimawandel", "Digitalisierung", "Migration", "Wirtschaft", "Bildung"],
-        "C1": ["Künstliche Intelligenz", "Sprachpolitik", "Philosophie", "Globalisierung"],
+        "A1": ["Einkaufen im Supermarkt", "Familie und Zuhause", "Beim Arzt", "Mit dem Bus fahren", "Essen und Kochen"],
+        "A2": ["Arztbesuch und Krankmeldung", "Wohnung suchen", "Mit dem Zug fahren", "Auf dem Amt", "Arbeit und Kollegen"],
+        "B1": ["Wohnungssuche und Mietvertrag", "Gespräch beim Jobcenter", "Kinder und Schule", "Gesundheit und Vorsorge", "Nachbarschaft und Alltag"],
+        "B2": ["Pflege von Angehörigen", "Berufseinstieg und Bewerbung", "Mietpreise und Wohnungsnot", "Familie und Beruf vereinbaren", "Gesundheitsversorgung"],
+        "C1": ["Soziale Ungleichheit im Alltag", "Chancen und Hürden auf dem Arbeitsmarkt", "Wohnen als gesellschaftliche Frage", "Pflege und Würde im Alter"],
     }
     thema = random.choice(themen_pool.get(niveau, themen_pool["B1"]))
     try:
@@ -465,11 +501,11 @@ Antworte NUR mit JSON: {{"saetze": ["Satz 1", "Satz 2", "Satz 3"]}}"""}],
     except Exception as e:
         print(f"[M4] Vorlese-Generierung fehlgeschlagen: {e}")
         fallback = {
-            "A1": ["Ich heiße Anna.", "Ich wohne in Berlin.", "Das ist mein Haus."],
-            "A2": ["Jeden Morgen trinke ich Kaffee.", "Mein Bruder arbeitet als Arzt.", "Das Wetter ist heute schön."],
-            "B1": ["Die Digitalisierung verändert unsere Arbeitswelt grundlegend.", "Viele Menschen nutzen täglich soziale Medien.", "Gesunde Ernährung ist wichtig für das Wohlbefinden."],
-            "B2": ["Die wirtschaftlichen Folgen des Klimawandels sind noch nicht vollständig absehbar.", "Bildung gilt als wichtigster Faktor für soziale Mobilität.", "Digitale Technologien eröffnen neue Möglichkeiten, bringen aber auch Risiken mit sich."],
-            "C1": ["Die philosophische Frage nach dem freien Willen beschäftigt Denker seit Jahrhunderten.", "Globale Lieferketten erweisen sich in Krisenzeiten als besonders anfällig.", "Sprachliche Nuancen spiegeln kulturelle Wertvorstellungen wider."],
+            "A1": ["Ich kaufe jeden Tag Brot beim Bäcker.", "Meine Mutter kocht gerne Suppe.", "Das Busticket kostet zwei Euro."],
+            "A2": ["Jeden Morgen fahre ich mit dem Bus zur Arbeit.", "Ich habe nächste Woche einen Termin beim Arzt.", "Am Wochenende räume ich meine Wohnung auf."],
+            "B1": ["Viele Familien suchen eine bezahlbare Wohnung in der Nähe der Schule.", "Wer krank ist, sollte früh zum Arzt gehen und nicht zu lange warten.", "Ein gutes Gespräch mit dem Chef kann helfen, Probleme im Job zu lösen."],
+            "B2": ["Wer Angehörige pflegt, braucht Unterstützung vom Staat und von der Familie.", "Eine Bewerbung auf Deutsch zu schreiben ist für viele Zugewanderte eine große Hürde.", "Steigende Mieten machen es für viele Familien schwer, in der Stadt zu bleiben."],
+            "C1": ["Armut trotz Arbeit ist ein wachsendes Problem in wohlhabenden Gesellschaften.", "Wer in einer anderen Sprache aufgewachsen ist, erlebt Deutsch oft als Schlüssel und Barriere zugleich.", "Die Pflege älterer Menschen ist eine gesellschaftliche Aufgabe, die mehr Anerkennung verdient."],
         }
         saetze = fallback.get(niveau, fallback["B1"])
 
@@ -551,15 +587,18 @@ async def m4_analysiere(token: str, db: AsyncSession = Depends(get_db)):
     if audio_score:
         raw_score = audio_score.get("gesamt_score", 0)
         # GPT gibt 0-10 zurück → auf 0-100 normalisieren
-        modul.gesamt_score = round(raw_score * 10, 1) if raw_score <= 10 else raw_score
+        relativer_score = round(raw_score * 10, 1) if raw_score <= 10 else raw_score
         cefr_str = audio_score.get("cefr_niveau", "B1")
     else:
-        modul.gesamt_score = analyse.get("lesegenauigkeit", 50)
-        cefr_str = _score_to_cefr(modul.gesamt_score)
+        relativer_score = analyse.get("lesegenauigkeit", 50)
+        cefr_str = _score_to_cefr(relativer_score)
 
-    modul.cefr_niveau = CEFRNiveau(cefr_str) if cefr_str in CEFRNiveau._value2member_map_ else CEFRNiveau.B1
+    cefr_str = cefr_str if cefr_str in CEFRNiveau._value2member_map_ else "B1"
+    modul.gesamt_score = cefr_relativer_zu_absolut(relativer_score, cefr_str)
+    modul.cefr_niveau = CEFRNiveau(cefr_str)
     modul.status = ModulStatus.abgeschlossen
     modul.abgeschlossen_am = datetime.now(timezone.utc)
+    sess.laeuft_ab_am = datetime.now(timezone.utc) + timedelta(hours=2)
     await db.commit()
 
     if sess.alle_abgeschlossen():
@@ -601,7 +640,8 @@ Anforderungen:
 - Aufgabentyp: {aufgabentyp}
 - Sprechdauer: {dauer}
 - Sprachliche Anforderungen: {sprachl_anforderungen}
-- Konkretes, interessantes Thema (nicht generisch, nicht immer Klimawandel)
+- Konkretes, lebensnahes Thema passend zum Niveau – Themen, die wirklich jeden betreffen: z.B. Arztbesuch, Wohnungssuche, Busfahren, Einkaufen, Nachbarn, Kinder und Schule, Jobsuche, Behördengänge, Krankmeldung, Feierabend, Kochen, Familie, Freunde, Urlaub, Geld, Gesundheit – für höhere Niveaus auch: Pflege, Mietpreise, Berufseinstieg, Familie und Arbeit vereinbaren, soziale Absicherung
+- Kein Klimawandel, keine KI, keine Wissenschaft, keine akademischen Themen
 - 2-3 konkrete Leitfragen oder Sprechimpulse
 
 Antworte NUR mit JSON: {{\"thema\": \"Kurzer Titel\", \"aufgabe\": \"Die vollst\u00e4ndige Aufgabenstellung mit Leitfragen\"}}"""}],
@@ -610,18 +650,20 @@ Antworte NUR mit JSON: {{\"thema\": \"Kurzer Titel\", \"aufgabe\": \"Die vollst\
         )
         import json as _json
         data = _json.loads(resp.choices[0].message.content)
-        thema = data.get("aufgabe") or data.get("thema", "Freies Sprechen")
+        thema_titel = data.get("thema", "Freies Sprechen")
+        aufgabe_text = data.get("aufgabe") or thema_titel
+        thema = aufgabe_text  # vollständige Aufgabenstellung für Speicherung
     except Exception as e:
         print(f"[M5] Thema-Generierung fehlgeschlagen: {e}")
-        import random
         fallback = {
-            "A1": "Stell dich vor: Wie hei\u00dft du? Wo wohnst du? Was machst du gerne?",
-            "A2": "Erz\u00e4hl von deiner Woche: Was hast du gemacht? Was war sch\u00f6n? Was war schwierig?",
-            "B1": "Beschreibe eine Person, die du bewunderst: Wer ist das? Warum bewunderst du sie? Was hast du von ihr gelernt?",
-            "B2": "Diskutiere: Sollte das Studium in Deutschland kostenlos sein? Welche Argumente gibt es daf\u00fcr und dagegen? Was ist deine Meinung?",
-            "C1": "Analysiere: Inwiefern ver\u00e4ndert k\u00fcnstliche Intelligenz unsere Vorstellung von Kreativit\u00e4t und k\u00fcnstlerischem Ausdruck? Ber\u00fccksichtige verschiedene Perspektiven.",
+            "A1": ("Selbstvorstellung", "Stell dich vor: Wie heißt du? Wo wohnst du? Was machst du gerne?"),
+            "A2": ("Mein Alltag", "Erzähl von deinem Alltag: Was machst du morgens? Wie kommst du zur Arbeit oder zur Schule? Was isst du gerne?"),
+            "B1": ("Meine Wohnsituation", "Beschreibe, wo du wohnst: Wie ist deine Wohnung? Was gefällt dir? Was ist manchmal schwierig – zum Beispiel mit Nachbarn, Vermieter oder Nebenkosten?"),
+            "B2": ("Familie und Beruf", "Erzähl: Wie organisierst du deinen Alltag mit Familie und Arbeit? Was ist einfach, was ist schwierig? Was wünschst du dir?"),
+            "C1": ("Wohnen in Deutschland", "Diskutiere: Warum ist es für viele Menschen so schwer, eine bezahlbare Wohnung zu finden? Was sind die Ursachen? Was könnte helfen?"),
         }
-        thema = fallback.get(niveau, fallback["B1"])
+        thema_titel, aufgabe_text = fallback.get(niveau, fallback["B1"])
+        thema = aufgabe_text
 
     modul = _get_modul(sess, ModulTyp.m5_sprechen)
     if modul:
@@ -630,7 +672,7 @@ Antworte NUR mit JSON: {{\"thema\": \"Kurzer Titel\", \"aufgabe\": \"Die vollst\
         modul.status = ModulStatus.laufend
         await db.commit()
 
-    return {"thema": thema, "niveau": niveau, "dauer_sekunden": 90}
+    return {"thema": aufgabe_text, "thema_titel": thema_titel, "niveau": niveau, "dauer_sekunden": 90}
 
 
 @router.post("/api/m5/{token}/upload")
@@ -706,15 +748,16 @@ async def m5_analysiere(token: str, db: AsyncSession = Depends(get_db)):
 
     modul.set_ki_analyse(analyse)
     text_analyse = analyse.get("text_analyse", {})
-    gesamt_score = text_analyse.get("gesamt_score", 5.0)
+    raw_score = text_analyse.get("gesamt_score", 5.0)
     # GPT gibt 0-10 zurück → auf 0-100 normalisieren
-    if gesamt_score <= 10:
-        gesamt_score = round(gesamt_score * 10, 1)
-    modul.gesamt_score = gesamt_score
-    cefr_str = text_analyse.get("cefr_niveau", _score_to_cefr(gesamt_score))
-    modul.cefr_niveau = CEFRNiveau(cefr_str) if cefr_str in CEFRNiveau._value2member_map_ else CEFRNiveau.B1
+    relativer_score = round(raw_score * 10, 1) if raw_score <= 10 else raw_score
+    cefr_str = text_analyse.get("cefr_niveau", _score_to_cefr(relativer_score))
+    cefr_str = cefr_str if cefr_str in CEFRNiveau._value2member_map_ else "B1"
+    modul.gesamt_score = cefr_relativer_zu_absolut(relativer_score, cefr_str)
+    modul.cefr_niveau = CEFRNiveau(cefr_str)
     modul.status = ModulStatus.abgeschlossen
     modul.abgeschlossen_am = datetime.now(timezone.utc)
+    sess.laeuft_ab_am = datetime.now(timezone.utc) + timedelta(hours=2)
     await db.commit()
 
     if sess.alle_abgeschlossen():
@@ -756,7 +799,8 @@ async def m6_aufgabe(token: str, db: AsyncSession = Depends(get_db)):
 Anforderungen:
 - Textsorte: {textsorte}
 - Länge: {laenge}
-- Konkretes, interessantes Thema (nicht generisch)
+- Konkretes, lebensnahes Thema passend zum Niveau – Themen, die wirklich jeden betreffen: z.B. Arztbesuch, Wohnungssuche, Einkaufen, Nachbarn, Kinder und Schule, Jobsuche, Behördengänge, Kochen, Familie, Freunde, Urlaub, Geld, Gesundheit, Feierabend – für höhere Niveaus auch: Pflege, Mietpreise, Berufseinstieg, Familie und Arbeit vereinbaren, soziale Absicherung
+- Kein Klimawandel, keine KI, keine Wissenschaft, keine rein akademischen Themen
 - Klare Aufgabenstellung mit 2–3 Leitfragen oder Punkten
 
 Antworte NUR mit JSON: {"aufgabe": "Die vollständige Aufgabenstellung auf Deutsch"}"""}],
@@ -771,10 +815,10 @@ Antworte NUR mit JSON: {"aufgabe": "Die vollständige Aufgabenstellung auf Deuts
         print(f"[M6] Aufgaben-Generierung fehlgeschlagen: {e}")
         fallback = {
             "A1": "Schreibe 3–4 Sätze über dich: Wie heißt du? Wo wohnst du? Was machst du gerne?",
-            "A2": "Du hast letzte Woche ein Konzert besucht. Schreibe eine kurze Nachricht (5–6 Sätze) an einen Freund: Was war das für ein Konzert? Wie war die Musik? Was hat dir gefallen oder nicht gefallen?",
-            "B1": "Viele junge Menschen verbringen viel Zeit mit sozialen Medien. Schreibe einen Text (8–10 Sätze): Welche Vor- und Nachteile siehst du? Wie nutzt du selbst soziale Medien? Was würdest du anderen empfehlen?",
-            "B2": "In vielen Ländern wird diskutiert, ob das Schulfach 'Digitale Kompetenz' Pflicht sein sollte. Schreibe einen Meinungstext (12–15 Sätze): Welche Argumente gibt es dafür und dagegen? Wie ist deine Meinung und warum?",
-            "C1": "Analysiere in einem Essay (150–200 Wörter) die Aussage: 'Künstliche Intelligenz wird den Arbeitsmarkt stärker verändern als die Industrialisierung.' Berücksichtige verschiedene Perspektiven und belege deine Argumentation.",
+            "A2": "Du warst letzte Woche beim Arzt. Schreibe eine kurze Nachricht (5–6 Sätze) an einen Freund: Warum warst du dort? Wie war es? Was hat der Arzt gesagt?",
+            "B1": "Schreibe einen Text (8–10 Sätze) über deine Wohnsituation: Wo wohnst du? Was gefällt dir an deiner Wohnung oder deinem Wohnort? Was ist manchmal schwierig – zum Beispiel mit dem Vermieter, den Nachbarn oder den Kosten?",
+            "B2": "Viele Menschen haben Schwierigkeiten, Beruf und Familie zu vereinbaren. Schreibe einen Meinungstext (12–15 Sätze): Was sind die größten Herausforderungen? Was hilft? Was wünschst du dir von Arbeitgebern oder dem Staat?",
+            "C1": "Schreibe einen Essay (150–200 Wörter) zum Thema: 'In Deutschland ist es für viele Menschen sehr schwer, eine bezahlbare Wohnung zu finden.' Erkläre die Ursachen, beschreibe die Folgen für Betroffene und schlage mögliche Lösungen vor.",
         }
         aufgabe_text = fallback.get(niveau, fallback["B1"])
 
@@ -832,11 +876,14 @@ async def m6_submit(
     modul.set_ki_analyse(analyse)
     raw_score = analyse.get("gesamt_score", 5.0)
     # GPT gibt 0-10 zurück → auf 0-100 normalisieren
-    modul.gesamt_score = round(raw_score * 10, 1) if raw_score <= 10 else raw_score
-    cefr_str = analyse.get("cefr_niveau", _score_to_cefr(modul.gesamt_score))
-    modul.cefr_niveau = CEFRNiveau(cefr_str) if cefr_str in CEFRNiveau._value2member_map_ else CEFRNiveau.B1
+    relativer_score = round(raw_score * 10, 1) if raw_score <= 10 else raw_score
+    cefr_str = analyse.get("cefr_niveau", _score_to_cefr(relativer_score))
+    cefr_str = cefr_str if cefr_str in CEFRNiveau._value2member_map_ else "B1"
+    modul.gesamt_score = cefr_relativer_zu_absolut(relativer_score, cefr_str)
+    modul.cefr_niveau = CEFRNiveau(cefr_str)
     modul.status = ModulStatus.abgeschlossen
     modul.abgeschlossen_am = datetime.now(timezone.utc)
+    sess.laeuft_ab_am = datetime.now(timezone.utc) + timedelta(hours=2)
     await db.commit()
 
     if sess.alle_abgeschlossen():

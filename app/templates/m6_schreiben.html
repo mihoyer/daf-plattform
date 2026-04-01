@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>M6 Schreiben – DaF Sprachdiagnostik</title>
+  <title>M6 Schreiben – DaF/DaZ Sprachdiagnostik</title>
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
 <nav class="navbar">
   <div class="navbar-inner">
-    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF/DaZ Sprachdiagnostik</a>
     <div class="badge badge-primary">✍️ M6 – Schreiben</div>
   </div>
 </nav>
@@ -38,12 +38,12 @@
     <div class="card mb-6">
       <h4 class="mb-3">Eingabemethode</h4>
       <div class="modus-toggle">
-        <button class="modus-btn active" id="btn-text" onclick="setEingabe('text')">⌨️ Texteingabe</button>
-        <button class="modus-btn" id="btn-foto" onclick="setEingabe('foto')">📷 Handschrift-Foto</button>
+        <button class="modus-btn" id="btn-text" disabled title="Texteingabe ist vorerst nicht verfügbar" style="opacity:.4; cursor:not-allowed;">&#9000;&#65039; Texteingabe</button>
+        <button class="modus-btn active" id="btn-foto">&#128247; Handschrift-Foto</button>
       </div>
 
-      <!-- Texteingabe -->
-      <div id="eingabe-text" class="mt-4">
+      <!-- Texteingabe (vorerst deaktiviert) -->
+      <div id="eingabe-text" class="mt-4 hidden">
         <textarea id="text-eingabe" placeholder="Schreibe hier deinen Text…"
           style="width:100%; min-height:200px; padding:1rem; border:1.5px solid var(--gray-200); border-radius:var(--radius); font-size:1rem; font-family:inherit; resize:vertical; outline:none; transition:var(--transition);"
           oninput="aktualisiereZaehler()"></textarea>
@@ -54,7 +54,7 @@
       </div>
 
       <!-- Foto-Upload -->
-      <div id="eingabe-foto" class="hidden mt-4">
+      <div id="eingabe-foto" class="mt-4">
         <div id="foto-dropzone" class="foto-dropzone" onclick="document.getElementById('foto-input').click()">
           <div style="font-size:2.5rem; margin-bottom:.75rem;">📷</div>
           <p class="font-bold">Foto hochladen oder aufnehmen</p>
@@ -95,7 +95,7 @@
 
 <script>
 const token = '{{ token }}';
-let eingabeModus = 'text';
+let eingabeModus = 'foto'; // Texteingabe vorerst deaktiviert
 let fotoFile = null;
 let aufgabeId = null;
 

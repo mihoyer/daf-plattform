@@ -1,162 +1,121 @@
-# Deployment-Anleitung – DaF Sprachdiagnostik Plattform
+# Deployment-Anleitung: DaF/DaZ Sprachdiagnostik-Plattform
 
 ## Voraussetzungen
 
-- DigitalOcean Droplet: Ubuntu 22.04, min. 2 GB RAM (empfohlen: 4 GB)
-- Domain mit Subdomain (z. B. `einstufung.ihre-domain.de`)
-- OpenAI API-Key mit Zugriff auf GPT-4.1, GPT-4o, Whisper, TTS
-- Stripe-Account (Testmodus für den Anfang)
+- Ubuntu 22.04 LTS (frischer Server)
+- Root-Zugang
+- Domain mit DNS-Eintrag auf die Server-IP
+- PostgreSQL-Datenbank (lokal oder extern)
 
----
-
-## Schritt 1: Repository auf GitHub hochladen
+## Schritt 1: System vorbereiten
 
 ```bash
-git init
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/DEIN-USERNAME/daf-plattform.git
-git push -u origin main
+apt update && apt upgrade -y
+apt install -y python3.12 python3.12-venv python3-pip git nginx certbot python3-certbot-nginx postgresql postgresql-contrib
 ```
 
----
-
-## Schritt 2: Droplet vorbereiten
-
-Verbinde dich mit der DigitalOcean Web Console oder per SSH:
+## Schritt 2: Datenbank einrichten
 
 ```bash
-ssh root@DEINE-IP
+sudo -u postgres psql -c "CREATE USER dafuser WITH PASSWORD 'DEIN_DB_PASSWORT';"
+sudo -u postgres psql -c "CREATE DATABASE dafplattform OWNER dafuser;"
 ```
 
-Repository klonen:
-```bash
-git clone https://github.com/DEIN-USERNAME/daf-plattform.git /var/www/daf-plattform
-```
-
----
-
-## Schritt 3: Deployment-Skript ausführen
+## Schritt 3: Code klonen
 
 ```bash
-cd /var/www/daf-plattform && bash scripts/deploy.sh
+mkdir -p /var/www
+cd /var/www
+git clone https://github.com/mihoyer/daf-plattform.git
+cd daf-plattform
 ```
 
-Das Skript installiert automatisch:
-- Python 3, pip, venv
-- PostgreSQL
-- Nginx
-- ffmpeg (für Audio-Konvertierung)
-- Certbot (für HTTPS)
-- Alle Python-Abhängigkeiten
-
----
-
-## Schritt 4: .env konfigurieren
+## Schritt 4: Python-Umgebung einrichten
 
 ```bash
-nano /var/www/daf-plattform/.env
+python3.12 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Mindestens diese Werte eintragen:
+## Schritt 5: Umgebungsvariablen konfigurieren
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Folgende Werte in der `.env` anpassen:
 
 ```env
+DATABASE_URL=postgresql+asyncpg://dafuser:DEIN_DB_PASSWORT@localhost/dafplattform
 OPENAI_API_KEY=sk-...
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PUBLISHABLE_KEY=pk_test_...
-DATABASE_URL=postgresql+asyncpg://dafuser:dafpassword_AENDERN@localhost/dafplattform
-ADMIN_PASSWORD=sicheres-passwort
-SECRET_KEY=langer-zufaelliger-string-min-32-zeichen
-BASE_URL=https://einstufung.ihre-domain.de
-BETREIBER_NAME=Ihr Name / Ihre Organisation
-BETREIBER_ADRESSE=Straße, PLZ Ort, Land
-BETREIBER_EMAIL=datenschutz@ihre-domain.de
+ADMIN_PASSWORD=DEIN_ADMIN_PASSWORT
+TESTGRUPPE_PASSWORT=DEIN_TESTGRUPPEN_PASSWORT
+SECRET_KEY=ZUFAELLIGER_LANGER_STRING
+BASE_URL=https://DEINE_DOMAIN.de
+STRIPE_SECRET_KEY=sk_live_... (optional, fuer Zahlungen)
+STRIPE_PUBLISHABLE_KEY=pk_live_... (optional)
 ```
 
-Service neu starten:
-```bash
-systemctl restart daf-plattform
-```
-
----
-
-## Schritt 5: PostgreSQL-Passwort ändern
+## Schritt 6: Datenbank-Tabellen erstellen
 
 ```bash
-sudo -u postgres psql
-ALTER USER dafuser WITH PASSWORD 'NEUES-SICHERES-PASSWORT';
-\q
+source venv/bin/activate
+python3 -c "import asyncio; from app.models.database import init_db; asyncio.run(init_db())"
 ```
 
-Dann in der `.env` das neue Passwort eintragen und Service neu starten.
-
----
-
-## Schritt 6: DNS einrichten
-
-Bei Ihrem DNS-Anbieter (Artfiles):
-- Typ: `A`
-- Name: `einstufung` (oder gewünschte Subdomain)
-- Wert: `IHRE-DROPLET-IP`
-- TTL: 300
-
----
-
-## Schritt 7: HTTPS einrichten
+## Schritt 7: Systemd-Service einrichten
 
 ```bash
-sed -i 's/server_name _;/server_name einstufung.ihre-domain.de;/' /etc/nginx/sites-available/daf-plattform
-nginx -t && systemctl reload nginx
-certbot --nginx -d einstufung.ihre-domain.de
+cp scripts/daf-plattform.service /etc/systemd/system/
+# WorkingDirectory und ExecStart in der Service-Datei anpassen falls noetig
+systemctl daemon-reload
+systemctl enable daf-plattform
+systemctl start daf-plattform
+systemctl status daf-plattform
 ```
 
----
+## Schritt 8: Nginx konfigurieren
 
-## Schritt 8: Stripe Webhook einrichten
-
-Im Stripe Dashboard → Webhooks → Endpoint hinzufügen:
-- URL: `https://einstufung.ihre-domain.de/api/stripe/webhook`
-- Events: `checkout.session.completed`, `payment_intent.payment_failed`
-
-Den Webhook-Secret in die `.env` eintragen:
-```env
-STRIPE_WEBHOOK_SECRET=whsec_...
+```bash
+cp scripts/nginx.conf /etc/nginx/sites-available/daf-plattform
+# Domain in der Konfiguration anpassen:
+nano /etc/nginx/sites-available/daf-plattform
+ln -s /etc/nginx/sites-available/daf-plattform /etc/nginx/sites-enabled/
+nginx -t
+systemctl reload nginx
 ```
 
----
+## Schritt 9: SSL-Zertifikat einrichten
+
+```bash
+certbot --nginx -d DEINE_DOMAIN.de
+```
+
+## Schritt 10: Matplotlib-Cache-Verzeichnis setzen
+
+In `/etc/systemd/system/daf-plattform.service` unter `[Service]` hinzufügen:
+```
+Environment=MPLCONFIGDIR=/tmp/matplotlib
+```
+Dann: `systemctl daemon-reload && systemctl restart daf-plattform`
+
+## Zugang nach Deployment
+
+| URL | Beschreibung |
+|---|---|
+| `https://DEINE_DOMAIN.de/` | Startseite / Test-Einstieg |
+| `https://DEINE_DOMAIN.de/admin/login` | Admin-Dashboard |
+| `https://DEINE_DOMAIN.de/testgruppe` | Testgruppen-Uebersicht |
+| `https://DEINE_DOMAIN.de/k/CODE` | Direktzugang via QR-Code |
 
 ## Updates einspielen
 
 ```bash
-cd /var/www/daf-plattform && git pull origin main && systemctl restart daf-plattform
-```
-
----
-
-## Backup erstellen
-
-```bash
-# Anwendung
-tar -czf /root/backup-daf-$(date +%Y%m%d).tar.gz /var/www/daf-plattform
-
-# Datenbank
-sudo -u postgres pg_dump dafplattform > /root/backup-db-$(date +%Y%m%d).sql
-```
-
----
-
-## Troubleshooting
-
-```bash
-# Service-Status
-systemctl status daf-plattform
-
-# Logs anzeigen
-journalctl -u daf-plattform --no-pager | tail -30
-
-# Nginx-Fehler
-journalctl -u nginx --no-pager | tail -20
-
-# Port prüfen
-ss -tlnp | grep 8001
+cd /var/www/daf-plattform
+git pull
+source venv/bin/activate
+pip install -r requirements.txt
+systemctl restart daf-plattform
 ```

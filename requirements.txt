@@ -17,3 +17,6 @@ httpx==0.28.1
 python-dotenv==1.0.1
 aiofiles==24.1.0
 pillow==11.0.0
+matplotlib==3.10.8
+numpy==2.4.4
+qrcode==8.2

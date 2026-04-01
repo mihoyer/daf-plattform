@@ -143,7 +143,21 @@ async def loesche_mediendateien(modul: ModulErgebnis) -> None:
 
 
 async def berechne_gesamt_ergebnis(db: AsyncSession, session: TestSession) -> None:
-    """Berechnet Gesamtscore und CEFR-Niveau aus allen Modul-Ergebnissen."""
+    """
+    Berechnet Gesamtscore und CEFR-Niveau aus allen Modul-Ergebnissen.
+
+    Methodik:
+    1. Gewichteter Score: Jedes Modul trägt unterschiedlich stark zum Gesamtscore bei.
+       - M1 Grammatik:      10 %
+       - M2 Lesen:          20 %
+       - M3 Hören:          20 %
+       - M4 Vorlesen:       10 %
+       - M5 Freies Sprechen: 20 %
+       - M6 Schreiben:      20 %
+    2. Basis-Niveau: Wird aus dem gewichteten Score abgeleitet.
+    3. K.O.-Kriterium: Das Gesamtniveau darf maximal eine Stufe über dem
+       schlechtesten produktiven Modul (Sprechen oder Schreiben) liegen.
+    """
     abgeschlossene = [
         m for m in session.module
         if m.status == ModulStatus.abgeschlossen and m.gesamt_score is not None
@@ -151,50 +165,73 @@ async def berechne_gesamt_ergebnis(db: AsyncSession, session: TestSession) -> No
     if not abgeschlossene:
         return
 
-    # CEFR-Gewichtung: Numerischen Wert pro Niveau
     CEFR_WERT = {"A1": 1, "A2": 2, "B1": 3, "B2": 4, "C1": 5, "C2": 6}
     CEFR_VON_WERT = {1: CEFRNiveau.A1, 2: CEFRNiveau.A2, 3: CEFRNiveau.B1,
                      4: CEFRNiveau.B2, 5: CEFRNiveau.C1, 6: CEFRNiveau.C2}
 
-    # Gesamt-Score: Durchschnitt der normalisierten Modul-Scores
-    # M4/M5 (Aussprache) haben Scores 0-10, alle anderen 0-100 -> normalisieren
-    normierte_scores = []
+    # Gewichtung pro Modul-Typ
+    GEWICHT = {
+        ModulTyp.m1_grammatik:  0.10,
+        ModulTyp.m2_lesen:      0.20,
+        ModulTyp.m3_hoerverstehen: 0.20,
+        ModulTyp.m4_vorlesen:   0.10,
+        ModulTyp.m5_sprechen:   0.20,
+        ModulTyp.m6_schreiben:  0.20,
+    }
+
+    # Normierte Scores (alle auf 0-100 Skala)
+    modul_scores = {}  # {ModulTyp: normierter_score}
     for m in abgeschlossene:
         score = m.gesamt_score
-        # Scores unter 15 sind wahrscheinlich auf 0-10 Skala -> auf 0-100 skalieren
+        # Scores <= 15 sind wahrscheinlich auf 0-10 Skala -> auf 0-100 skalieren
         if score is not None and score <= 15:
             score = score * 10
-        normierte_scores.append(score)
-    gesamt_score = sum(normierte_scores) / len(normierte_scores)
+        modul_scores[m.modul] = score
+
+    # Gewichteten Gesamt-Score berechnen
+    gewichtete_summe = 0.0
+    gesamtgewicht = 0.0
+    for modul_typ, score in modul_scores.items():
+        gewicht = GEWICHT.get(modul_typ, 1.0 / len(modul_scores))
+        gewichtete_summe += score * gewicht
+        gesamtgewicht += gewicht
+
+    # Falls nicht alle Module vorhanden: Gewichte normalisieren
+    gesamt_score = gewichtete_summe / gesamtgewicht if gesamtgewicht > 0 else 0.0
     session.gesamt_score = round(gesamt_score, 1)
 
-    # CEFR aus Modul-CEFRs ableiten (gewichteter Durchschnitt der CEFR-Werte)
-    cefr_werte = []
-    for m in abgeschlossene:
-        if m.cefr_niveau:
-            wert = CEFR_WERT.get(m.cefr_niveau.value, 3)
-            cefr_werte.append(wert)
+    # Basis-Niveau aus gewichtetem Score ableiten
+    # Absolute Skala: A1=0-14, A2=15-34, B1=35-59, B2=60-79, C1/C2=80-100
+    def score_zu_niveau(s: float) -> int:
+        """Gibt CEFR-Wert (1-6) für einen absoluten Score (0-100) zurück."""
+        if s >= 93: return 6  # C2
+        if s >= 80: return 5  # C1
+        if s >= 60: return 4  # B2
+        if s >= 35: return 3  # B1
+        if s >= 15: return 2  # A2
+        return 1              # A1
 
-    if cefr_werte:
-        durchschnitt = sum(cefr_werte) / len(cefr_werte)
-        # Runden zum nächsten Niveau
-        gerundet = round(durchschnitt)
-        gerundet = max(1, min(6, gerundet))
-        session.gesamt_niveau = CEFR_VON_WERT[gerundet]
+    basis_niveau_wert = score_zu_niveau(gesamt_score)
+
+    # K.O.-Kriterium: Schlechtestes produktives Modul bestimmen
+    # Produktive Kernmodule: Sprechen (M5) und Schreiben (M6)
+    ko_module = [ModulTyp.m5_sprechen, ModulTyp.m6_schreiben]
+    ko_niveau_werte = []
+    for modul_typ in ko_module:
+        score = modul_scores.get(modul_typ)
+        if score is not None:
+            ko_niveau_werte.append(score_zu_niveau(score))
+
+    if ko_niveau_werte:
+        schlechtestes_ko = min(ko_niveau_werte)
+        # Gesamtniveau darf maximal eine Stufe über dem schlechtesten K.O.-Modul liegen
+        max_erlaubtes_niveau = schlechtestes_ko + 1
+        endniveau_wert = min(basis_niveau_wert, max_erlaubtes_niveau)
     else:
-        # Fallback: Score-basiert
-        if gesamt_score >= 90:
-            session.gesamt_niveau = CEFRNiveau.C2
-        elif gesamt_score >= 78:
-            session.gesamt_niveau = CEFRNiveau.C1
-        elif gesamt_score >= 65:
-            session.gesamt_niveau = CEFRNiveau.B2
-        elif gesamt_score >= 50:
-            session.gesamt_niveau = CEFRNiveau.B1
-        elif gesamt_score >= 35:
-            session.gesamt_niveau = CEFRNiveau.A2
-        else:
-            session.gesamt_niveau = CEFRNiveau.A1
+        endniveau_wert = basis_niveau_wert
+
+    endniveau_wert = max(1, min(6, endniveau_wert))
+    session.gesamt_niveau = CEFR_VON_WERT[endniveau_wert]
 
     session.status = SessionStatus.abgeschlossen
     session.abgeschlossen_am = datetime.now(timezone.utc)

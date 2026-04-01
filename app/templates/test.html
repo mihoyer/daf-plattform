@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Test starten – DaF Sprachdiagnostik</title>
+  <title>Test starten – DaF/DaZ Sprachdiagnostik</title>
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
 <nav class="navbar">
   <div class="navbar-inner">
-    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF/DaZ Sprachdiagnostik</a>
     <div class="badge badge-success">✓ Zahlung bestätigt</div>
   </div>
 </nav>
@@ -27,14 +27,8 @@
       <p class="text-muted mt-2">Dein Test besteht aus den folgenden Modulen. Bearbeite sie der Reihe nach.</p>
     </div>
 
-    <!-- Fortschrittsanzeige -->
-    <div class="progress-steps mb-8" id="progress-steps"></div>
-
-    <!-- Modul-Liste -->
-    <div id="modul-liste" style="display:flex; flex-direction:column; gap:1rem; margin-bottom:2rem;"></div>
-
     <!-- Hinweise -->
-    <div class="card" style="background:var(--accent-light); border-color:var(--accent);">
+    <div class="card mb-6" style="background:var(--accent-light); border-color:var(--accent);">
       <h4 class="mb-2">💡 Hinweise vor dem Start</h4>
       <ul style="list-style:none; display:flex; flex-direction:column; gap:.5rem;">
         <li class="text-sm">🎙️ Stelle sicher, dass dein Mikrofon funktioniert und der Browser Zugriff hat.</li>
@@ -43,6 +37,12 @@
         <li class="text-sm">🔒 Deine Aufnahmen werden nach der Analyse automatisch gelöscht.</li>
       </ul>
     </div>
+
+    <!-- Fortschrittsanzeige -->
+    <div class="progress-steps mb-8" id="progress-steps"></div>
+
+    <!-- Modul-Liste -->
+    <div id="modul-liste" style="display:flex; flex-direction:column; gap:1rem; margin-bottom:2rem;"></div>
 
     <div class="text-center mt-8">
       <button class="btn btn-primary btn-lg" onclick="starteTest()">Test jetzt starten →</button>

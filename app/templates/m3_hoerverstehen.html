@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>M3 Hörverstehen – DaF Sprachdiagnostik</title>
+  <title>M3 Hörverstehen – DaF/DaZ Sprachdiagnostik</title>
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
 <nav class="navbar">
   <div class="navbar-inner">
-    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF/DaZ Sprachdiagnostik</a>
     <div class="badge badge-primary">🎧 M3 – Hörverstehen</div>
   </div>
 </nav>
@@ -32,7 +32,9 @@
     <div class="card mb-6">
       <h4 class="mb-3">Hörtext</h4>
       <audio id="audio-player" controls style="width:100%;" preload="auto"></audio>
-      <p class="text-xs text-muted mt-2">Du kannst den Text mehrmals anhören.</p>
+      <p class="text-xs text-muted mt-2" id="audio-hinweis">Höre den Text vollständig an. Danach kannst du ihn noch <strong>einmal</strong> wiederholen.</p>
+      <div id="wiederhol-zaehler" class="hidden" style="margin-top:.5rem; font-size:.8rem; color:#6b7280;"></div>
+      <button id="btn-zu-fragen" class="btn btn-secondary mt-3 hidden" onclick="zeigeFragenManuell()">Zu den Fragen →</button>
     </div>
 
     <!-- Fragen (erst nach erstem Anhören sichtbar) -->
@@ -60,7 +62,10 @@
 const token = '{{ token }}';
 let fragen = [];
 let antworten = {};
-let audioGespielt = false;
+let audioGespielt = false;   // erstes vollständiges Anhören abgeschlossen
+let audioWiederholungen = 0; // Zähler für Wiederholungen nach dem ersten Anhören
+let fragenGezeigt = false;   // verhindert doppeltes Einblenden
+const MAX_WIEDERHOLUNGEN = 1;
 
 async function ladeAufgabe() {
   try {
@@ -72,26 +77,84 @@ async function ladeAufgabe() {
     if (data.audio_b64) {
       // Backend liefert Base64-kodiertes MP3
       player.src = `data:audio/mp3;base64,${data.audio_b64}`;
+
+      // Fortschritt verfolgen: sobald >80% gehört, Button einblenden
+      player.addEventListener('timeupdate', () => {
+        if (!audioGespielt && player.duration > 0 &&
+            (player.currentTime / player.duration) >= 0.8) {
+          document.getElementById('btn-zu-fragen').classList.remove('hidden');
+        }
+      });
+
       player.addEventListener('ended', () => {
         if (!audioGespielt) {
+          // Erstes vollständiges Anhören: Fragen einblenden
           audioGespielt = true;
-          document.getElementById('hinweis-bereich').classList.add('hidden');
-          zeigeFragen();
-          document.getElementById('fragen-bereich').classList.remove('hidden');
+          document.getElementById('btn-zu-fragen').classList.add('hidden');
+          zeigeFragenEinmalig();
+          aktualisiereWiederholAnzeige(player);
+        } else {
+          // Jede weitere Wiederholung zählen
+          audioWiederholungen++;
+          aktualisiereWiederholAnzeige(player);
+        }
+      });
+
+      // Verhindern, dass der Player nach MAX_WIEDERHOLUNGEN erneut startet
+      player.addEventListener('play', () => {
+        if (audioGespielt && audioWiederholungen >= MAX_WIEDERHOLUNGEN) {
+          player.pause();
+          player.currentTime = 0;
+          document.getElementById('wiederhol-zaehler').textContent =
+            'Du hast den Text bereits einmal wiederholt. Bitte beantworte jetzt die Fragen.';
         }
       });
     } else {
       // Kein Audio verfügbar: Fragen sofort zeigen
       document.getElementById('hinweis-bereich').innerHTML =
         '<span class="alert-icon">⚠️</span><div class="text-sm">Kein Audio verfügbar. Bitte beantworte die Fragen direkt.</div>';
-      zeigeFragen();
-      document.getElementById('fragen-bereich').classList.remove('hidden');
+      zeigeFragenEinmalig();
     }
 
     document.getElementById('lade-bereich').classList.add('hidden');
     document.getElementById('aufgabe-bereich').classList.remove('hidden');
   } catch (e) {
     document.getElementById('lade-bereich').innerHTML = '<p class="text-muted">Fehler beim Laden.</p>';
+  }
+}
+
+function zeigeFragenManuell() {
+  // Manueller Button: wird eingeblendet sobald >80% gehört
+  audioGespielt = true;
+  document.getElementById('btn-zu-fragen').classList.add('hidden');
+  const player = document.getElementById('audio-player');
+  zeigeFragenEinmalig();
+  aktualisiereWiederholAnzeige(player);
+}
+
+function zeigeFragenEinmalig() {
+  if (fragenGezeigt) return;
+  fragenGezeigt = true;
+  document.getElementById('hinweis-bereich').classList.add('hidden');
+  zeigeFragen();
+  document.getElementById('fragen-bereich').classList.remove('hidden');
+  // Sanft nach unten scrollen
+  setTimeout(() => {
+    document.getElementById('fragen-bereich').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 200);
+}
+
+function aktualisiereWiederholAnzeige(player) {
+  const zaehlerEl = document.getElementById('wiederhol-zaehler');
+  zaehlerEl.classList.remove('hidden');
+  if (audioWiederholungen < MAX_WIEDERHOLUNGEN) {
+    zaehlerEl.textContent = `Du kannst den Text noch ${MAX_WIEDERHOLUNGEN - audioWiederholungen}\u00d7 wiederholen.`;
+  } else {
+    zaehlerEl.textContent = 'Keine weiteren Wiederholungen möglich. Bitte beantworte jetzt die Fragen.';
+    // Controls ausblenden, damit kein erneutes Abspielen möglich ist
+    player.controls = false;
+    player.style.opacity = '0.4';
+    player.style.pointerEvents = 'none';
   }
 }
 

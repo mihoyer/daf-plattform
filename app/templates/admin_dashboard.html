@@ -3,177 +3,340 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Dashboard – DaF Sprachdiagnostik</title>
+  <title>Admin Dashboard – DaF/DaZ Sprachdiagnostik</title>
   <link rel="stylesheet" href="/static/css/main.css">
+  <style>
+    .tab-btn { padding:.6rem 1.4rem; font-weight:600; font-size:.9rem; background:none; border:none; border-bottom:3px solid transparent; color:var(--gray-500); cursor:pointer; margin-bottom:-2px; transition:all .2s; }
+    .tab-btn.active { border-bottom-color:var(--primary); color:var(--primary); }
+    .stat-card { background:#fff; border:1px solid var(--gray-200); border-radius:12px; padding:1.25rem; text-align:center; }
+    .stat-val { font-size:2rem; font-weight:800; }
+    .tbl { width:100%; border-collapse:collapse; font-size:.875rem; }
+    .tbl th { padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600; background:var(--gray-50); border-bottom:1px solid var(--gray-200); }
+    .tbl td { padding:.7rem 1rem; border-bottom:1px solid var(--gray-100); }
+    .tbl tr:hover td { background:var(--gray-50); }
+    .badge { display:inline-block; padding:.2rem .55rem; border-radius:999px; font-size:.75rem; font-weight:600; }
+    .badge-success { background:#d1fae5; color:#065f46; }
+    .badge-warning { background:#fef3c7; color:#92400e; }
+    .badge-gray { background:#f3f4f6; color:#374151; }
+    .badge-danger { background:#fee2e2; color:#991b1b; }
+    .btn-xs { padding:.2rem .55rem; font-size:.75rem; border-radius:6px; border:1px solid var(--gray-200); background:#fff; cursor:pointer; text-decoration:none; color:var(--gray-700); }
+    .btn-xs:hover { background:var(--gray-50); }
+    .btn-xs.danger { border-color:#fca5a5; background:#fee2e2; color:#991b1b; }
+    .form-row { display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end; }
+    .form-row .fg { flex:1; min-width:130px; }
+    .form-row label { display:block; font-size:.8rem; font-weight:600; color:var(--gray-600); margin-bottom:.3rem; }
+    .form-row input, .form-row select { width:100%; padding:.45rem .7rem; border:1px solid var(--gray-300); border-radius:8px; font-size:.875rem; }
+    #gen-status { margin-top:.75rem; font-size:.875rem; }
+  </style>
 </head>
 <body>
 <nav class="navbar">
   <div class="navbar-inner">
-    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF Sprachdiagnostik</a>
-    <div class="flex gap-3 items-center">
-      <span class="badge badge-primary">Admin</span>
-      <a href="/admin/logout" class="btn btn-outline btn-sm">Abmelden</a>
+    <a href="/" class="navbar-brand"><div class="brand-icon">🎓</div>DaF/DaZ Sprachdiagnostik</a>
+    <div style="display:flex; gap:.75rem; align-items:center;">
+      <span class="badge badge-gray">Admin</span>
+      <button onclick="logout()" class="btn btn-outline btn-sm">Abmelden</button>
     </div>
   </div>
 </nav>
 
 <div class="container" style="padding-top:2rem; padding-bottom:4rem; max-width:1100px;">
-  <div class="flex justify-between items-center mb-8 flex-wrap gap-4">
-    <h1>Admin Dashboard</h1>
-    <div class="flex gap-2">
-      <a href="/admin/export/csv" class="btn btn-outline btn-sm">📊 CSV exportieren</a>
-      <a href="/admin/session/neu" class="btn btn-primary btn-sm">+ Neue Session</a>
-    </div>
+  <h1 style="margin-bottom:1.5rem;">Admin Dashboard</h1>
+
+  <!-- Tabs -->
+  <div style="display:flex; border-bottom:2px solid var(--gray-200); margin-bottom:2rem;">
+    <button class="tab-btn active" id="tab-sessions" onclick="zeigTab('sessions')">Sessions</button>
+    <button class="tab-btn" id="tab-codes" onclick="zeigTab('codes')">Testgruppen-Codes</button>
   </div>
 
-  <!-- Statistiken -->
-  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; margin-bottom:2rem;">
-    <div class="card text-center">
-      <div style="font-size:2rem; font-weight:800; color:var(--primary);">{{ stats.gesamt }}</div>
-      <div class="text-sm text-muted">Analysen gesamt</div>
+  <!-- ===== SESSIONS ===== -->
+  <div id="panel-sessions">
+    <!-- Statistiken -->
+    <div id="stats-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:1rem; margin-bottom:2rem;">
+      <div class="stat-card"><div class="stat-val" style="color:var(--primary);">–</div><div class="text-sm text-muted">Analysen gesamt</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--success);">–</div><div class="text-sm text-muted">Abgeschlossen</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--warning);">–</div><div class="text-sm text-muted">Laufend</div></div>
+      <div class="stat-card"><div class="stat-val" style="color:var(--gray-700);">–</div><div class="text-sm text-muted">Ø Score</div></div>
     </div>
-    <div class="card text-center">
-      <div style="font-size:2rem; font-weight:800; color:var(--success);">{{ stats.abgeschlossen }}</div>
-      <div class="text-sm text-muted">Abgeschlossen</div>
-    </div>
-    <div class="card text-center">
-      <div style="font-size:2rem; font-weight:800; color:var(--warning);">{{ stats.laufend }}</div>
-      <div class="text-sm text-muted">Laufend</div>
-    </div>
-    <div class="card text-center">
-      <div style="font-size:2rem; font-weight:800; color:var(--gray-700);">{{ stats.avg_score }}</div>
-      <div class="text-sm text-muted">Ø Gesamtscore</div>
-    </div>
-    <div class="card text-center">
-      <div style="font-size:2rem; font-weight:800; color:var(--primary);">{{ stats.heute }}</div>
-      <div class="text-sm text-muted">Heute</div>
-    </div>
-  </div>
 
-  <!-- CEFR-Verteilung -->
-  {% if stats.cefr_verteilung %}
-  <div class="card mb-6">
-    <h3 class="mb-4">CEFR-Verteilung</h3>
-    <div class="flex gap-3 flex-wrap">
-      {% for niveau, anzahl in stats.cefr_verteilung.items() %}
-      <div style="text-align:center; min-width:60px;">
-        <div style="font-size:1.5rem; font-weight:800;">{{ anzahl }}</div>
-        <div class="badge badge-gray">{{ niveau }}</div>
+    <!-- Filter -->
+    <div style="background:#fff; border:1px solid var(--gray-200); border-radius:12px; padding:1rem; margin-bottom:1rem;">
+      <div class="form-row">
+        <div class="fg">
+          <label>Status</label>
+          <select id="f-status" onchange="ladeSessions()">
+            <option value="">Alle</option>
+            <option value="abgeschlossen">Abgeschlossen</option>
+            <option value="laufend">Laufend</option>
+          </select>
+        </div>
+        <div class="fg" style="max-width:120px;">
+          <label>&nbsp;</label>
+          <button onclick="ladeSessions()" class="btn btn-primary btn-sm" style="width:100%;">Aktualisieren</button>
+        </div>
       </div>
-      {% endfor %}
+    </div>
+
+    <!-- Tabelle -->
+    <div style="background:#fff; border:1px solid var(--gray-200); border-radius:12px; overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Paket</th>
+              <th>Status</th>
+              <th>CEFR</th>
+              <th>Score</th>
+              <th>Datum</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-tbody">
+            <tr><td colspan="7" style="padding:2rem; text-align:center; color:var(--gray-400);">Wird geladen…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div id="pagination" style="display:flex; gap:.5rem; justify-content:center; margin-top:1rem;"></div>
+  </div>
+
+  <!-- ===== CODES ===== -->
+  <div id="panel-codes" style="display:none;">
+    <!-- Generator -->
+    <div style="background:#fff; border:1px solid var(--gray-200); border-radius:12px; padding:1.25rem; margin-bottom:1.5rem;">
+      <h3 style="margin-bottom:1rem;">Neue Zugangscodes erstellen</h3>
+      <div class="form-row">
+        <div class="fg"><label>Anzahl</label><input type="number" id="gen-anzahl" value="20" min="1" max="100"></div>
+        <div class="fg"><label>Präfix</label><input type="text" id="gen-prefix" value="TG" maxlength="6"></div>
+        <div class="fg">
+          <label>Paket</label>
+          <select id="gen-paket">
+            <option value="premium">Premium</option>
+            <option value="standard">Standard</option>
+            <option value="basis">Basis</option>
+          </select>
+        </div>
+        <div class="fg"><label>Max. Nutzungen</label><input type="number" id="gen-nutzungen" value="1" min="1" max="10"></div>
+        <div class="fg"><label>Notiz</label><input type="text" id="gen-notiz" placeholder="z.B. Kurs A"></div>
+      </div>
+      <div style="margin-top:.75rem; display:flex; gap:.5rem;">
+        <button onclick="erstelleCodes()" class="btn btn-primary btn-sm">Codes erstellen</button>
+      </div>
+      <div id="gen-status"></div>
+    </div>
+
+    <!-- Aktionen -->
+    <div style="display:flex; gap:.5rem; margin-bottom:1rem; flex-wrap:wrap;">
+      <button onclick="ladeCodes()" class="btn btn-outline btn-sm">Aktualisieren</button>
+      <a href="/api/admin/codes/qr-pdf" target="_blank" class="btn btn-primary btn-sm">QR-Code PDF</a>
+      <a href="/admin/testgruppe" target="_blank" class="btn btn-outline btn-sm">Testgruppen-Dashboard</a>
+    </div>
+
+    <!-- Codes-Tabelle -->
+    <div style="background:#fff; border:1px solid var(--gray-200); border-radius:12px; overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Paket</th>
+              <th>Nutzungen</th>
+              <th>Status</th>
+              <th>Notiz</th>
+              <th>Erstellt</th>
+              <th>Aktion</th>
+            </tr>
+          </thead>
+          <tbody id="codes-tbody">
+            <tr><td colspan="7" style="padding:2rem; text-align:center; color:var(--gray-400);">Wird geladen…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
-  {% endif %}
-
-  <!-- Filter -->
-  <div class="card mb-4">
-    <form method="GET" action="/admin/dashboard" class="flex gap-3 flex-wrap items-end">
-      <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
-        <label class="form-label">Paket</label>
-        <select name="paket" class="form-input">
-          <option value="">Alle</option>
-          <option value="basis" {% if filter_paket == 'basis' %}selected{% endif %}>Basis</option>
-          <option value="standard" {% if filter_paket == 'standard' %}selected{% endif %}>Standard</option>
-          <option value="premium" {% if filter_paket == 'premium' %}selected{% endif %}>Premium</option>
-        </select>
-      </div>
-      <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
-        <label class="form-label">Status</label>
-        <select name="status" class="form-input">
-          <option value="">Alle</option>
-          <option value="abgeschlossen" {% if filter_status == 'abgeschlossen' %}selected{% endif %}>Abgeschlossen</option>
-          <option value="laufend" {% if filter_status == 'laufend' %}selected{% endif %}>Laufend</option>
-        </select>
-      </div>
-      <div class="form-group" style="flex:1; min-width:150px; margin-bottom:0;">
-        <label class="form-label">CEFR</label>
-        <select name="cefr" class="form-input">
-          <option value="">Alle</option>
-          {% for n in ['A1','A2','B1','B2','C1','C2'] %}
-          <option value="{{ n }}" {% if filter_cefr == n %}selected{% endif %}>{{ n }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm">Filtern</button>
-      <a href="/admin/dashboard" class="btn btn-outline btn-sm">Zurücksetzen</a>
-    </form>
-  </div>
-
-  <!-- Sessions-Tabelle -->
-  <div class="card" style="padding:0; overflow:hidden;">
-    <div style="overflow-x:auto;">
-      <table style="width:100%; border-collapse:collapse; font-size:.875rem;">
-        <thead>
-          <tr style="background:var(--gray-50); border-bottom:1px solid var(--gray-200);">
-            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Session</th>
-            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Paket</th>
-            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Status</th>
-            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">CEFR</th>
-            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Score</th>
-            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Datum</th>
-            <th style="padding:.75rem 1rem; text-align:left; color:var(--gray-600); font-weight:600;">Aktionen</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for s in sessions %}
-          <tr style="border-bottom:1px solid var(--gray-100);" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''">
-            <td style="padding:.75rem 1rem; font-family:monospace; font-size:.8rem; color:var(--gray-500);">{{ s.token[:12] }}…</td>
-            <td style="padding:.75rem 1rem;">
-              <span class="badge badge-gray">{{ s.paket }}</span>
-            </td>
-            <td style="padding:.75rem 1rem;">
-              {% if s.status == 'abgeschlossen' %}
-              <span class="badge badge-success">✓ Abgeschlossen</span>
-              {% elif s.status == 'laufend' %}
-              <span class="badge badge-warning">⏳ Laufend</span>
-              {% else %}
-              <span class="badge badge-gray">{{ s.status }}</span>
-              {% endif %}
-            </td>
-            <td style="padding:.75rem 1rem;">
-              {% if s.cefr_niveau %}
-              <span style="font-weight:700; color:var(--primary);">{{ s.cefr_niveau }}</span>
-              {% else %}–{% endif %}
-            </td>
-            <td style="padding:.75rem 1rem;">
-              {% if s.gesamtscore %}
-              <span style="font-weight:600;">{{ s.gesamtscore | round(1) }}</span>
-              {% else %}–{% endif %}
-            </td>
-            <td style="padding:.75rem 1rem; color:var(--gray-500);">{{ s.erstellt_am }}</td>
-            <td style="padding:.75rem 1rem;">
-              <div class="flex gap-1">
-                {% if s.status == 'abgeschlossen' %}
-                <a href="/admin/session/{{ s.token }}" class="btn btn-outline btn-sm" style="padding:.25rem .6rem; font-size:.75rem;">Details</a>
-                <a href="/export/pdf/{{ s.token }}" class="btn btn-outline btn-sm" style="padding:.25rem .6rem; font-size:.75rem;" target="_blank">PDF</a>
-                {% endif %}
-                <a href="/admin/session/{{ s.token }}/loeschen" class="btn btn-sm" style="padding:.25rem .6rem; font-size:.75rem; background:var(--danger-light); color:var(--danger); border:1px solid var(--danger-light);"
-                   onclick="return confirm('Session wirklich löschen?')">🗑️</a>
-              </div>
-            </td>
-          </tr>
-          {% else %}
-          <tr>
-            <td colspan="7" style="padding:3rem; text-align:center; color:var(--gray-400);">
-              Keine Sessions gefunden.
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Pagination -->
-  {% if total_seiten > 1 %}
-  <div class="flex gap-2 justify-center mt-4">
-    {% for i in range(1, total_seiten + 1) %}
-    <a href="?seite={{ i }}&paket={{ filter_paket }}&status={{ filter_status }}&cefr={{ filter_cefr }}"
-       class="btn btn-sm {% if i == aktuelle_seite %}btn-primary{% else %}btn-outline{% endif %}"
-       style="padding:.3rem .7rem;">{{ i }}</a>
-    {% endfor %}
-  </div>
-  {% endif %}
 </div>
+
+<script>
+let aktuelleSeite = 1;
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function pruefeAuth() {
+  const r = await fetch('/api/admin/statistik', { credentials: 'include' });
+  if (r.status === 401) {
+    window.location.href = '/admin/login';
+  }
+}
+
+async function logout() {
+  await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
+  window.location.href = '/admin/login';
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function zeigTab(name) {
+  ['sessions','codes'].forEach(t => {
+    document.getElementById('panel-' + t).style.display = t === name ? '' : 'none';
+    document.getElementById('tab-' + t).classList.toggle('active', t === name);
+  });
+  if (name === 'codes') ladeCodes();
+}
+
+// ── Statistiken ───────────────────────────────────────────────────────────────
+async function ladeStats() {
+  try {
+    const r = await fetch('/api/admin/statistik', { credentials: 'include' });
+    if (!r.ok) return;
+    const d = await r.json();
+    const cards = document.querySelectorAll('#stats-grid .stat-val');
+    cards[0].textContent = d.gesamt_sessions ?? '–';
+    cards[1].textContent = d.abgeschlossene_sessions ?? '–';
+    cards[2].textContent = (d.gesamt_sessions - d.abgeschlossene_sessions) || '0';
+    cards[3].textContent = d.durchschnitt_score ?? '–';
+  } catch(e) {}
+}
+
+// ── Sessions ──────────────────────────────────────────────────────────────────
+async function ladeSessions(seite = 1) {
+  aktuelleSeite = seite;
+  const tbody = document.getElementById('sessions-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--gray-400);">Wird geladen…</td></tr>';
+  const status = document.getElementById('f-status').value;
+  const params = new URLSearchParams({ seite, limit: 25 });
+  if (status) params.set('status', status);
+  try {
+    const r = await fetch('/api/admin/sessions?' + params, { credentials: 'include' });
+    if (r.status === 401) { window.location.href = '/admin/login'; return; }
+    const d = await r.json();
+    if (!d.sessions || d.sessions.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--gray-400);">Keine Sessions gefunden.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.sessions.map(s => `
+      <tr>
+        <td style="font-family:monospace;font-size:.8rem;color:var(--gray-500);">${s.token.slice(0,12)}…</td>
+        <td><span class="badge badge-gray">${s.paket || '–'}</span></td>
+        <td>${s.status === 'abgeschlossen'
+          ? '<span class="badge badge-success">✓ Abgeschlossen</span>'
+          : '<span class="badge badge-warning">⏳ Laufend</span>'}</td>
+        <td><strong style="color:var(--primary);">${s.gesamt_niveau || '–'}</strong></td>
+        <td>${s.gesamt_score ? Math.round(s.gesamt_score) : '–'}</td>
+        <td style="color:var(--gray-500);font-size:.8rem;">${s.erstellt_am ? s.erstellt_am.slice(0,10) : '–'}</td>
+        <td>
+          <div style="display:flex;gap:.3rem;">
+            ${s.status === 'abgeschlossen' ? `
+              <a href="/ergebnis/${s.token}" target="_blank" class="btn-xs">Details</a>
+              <a href="/export/pdf/${s.token}" target="_blank" class="btn-xs">PDF</a>
+            ` : ''}
+            <button onclick="loescheSession('${s.token}')" class="btn-xs danger">🗑️</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+    // Pagination
+    const pg = document.getElementById('pagination');
+    pg.innerHTML = '';
+    for (let i = 1; i <= d.seiten; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = i;
+      btn.className = 'btn btn-sm ' + (i === seite ? 'btn-primary' : 'btn-outline');
+      btn.style.padding = '.3rem .7rem';
+      btn.onclick = () => ladeSessions(i);
+      pg.appendChild(btn);
+    }
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--danger);">Fehler beim Laden.</td></tr>';
+  }
+}
+
+async function loescheSession(token) {
+  if (!confirm('Session wirklich löschen?')) return;
+  await fetch('/api/admin/session/' + token, { method: 'DELETE', credentials: 'include' });
+  ladeSessions(aktuelleSeite);
+  ladeStats();
+}
+
+// ── Codes ─────────────────────────────────────────────────────────────────────
+async function ladeCodes() {
+  const tbody = document.getElementById('codes-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--gray-400);">Wird geladen…</td></tr>';
+  try {
+    const r = await fetch('/api/admin/codes', { credentials: 'include' });
+    if (r.status === 401) { window.location.href = '/admin/login'; return; }
+    const d = await r.json();
+    if (!d.codes || d.codes.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--gray-400);">Noch keine Codes vorhanden.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.codes.map(c => `
+      <tr>
+        <td style="font-family:monospace;font-weight:700;color:var(--primary);">${c.code}</td>
+        <td><span class="badge badge-gray">${c.paket}</span></td>
+        <td style="font-weight:600;color:${c.genutzt >= c.max_nutzungen ? 'var(--danger)' : 'var(--success)'};">
+          ${c.genutzt}/${c.max_nutzungen}
+        </td>
+        <td>${c.aktiv && c.genutzt < c.max_nutzungen
+          ? '<span class="badge badge-success">Aktiv</span>'
+          : c.genutzt >= c.max_nutzungen
+            ? '<span class="badge badge-gray">Verbraucht</span>'
+            : '<span class="badge badge-danger">Deaktiviert</span>'}</td>
+        <td style="color:var(--gray-500);font-size:.8rem;">${c.notiz || '–'}</td>
+        <td style="color:var(--gray-500);font-size:.8rem;">${c.erstellt_am ? c.erstellt_am.slice(0,10) : '–'}</td>
+        <td>${c.aktiv
+          ? `<button onclick="deaktiviereCode(${c.id})" class="btn-xs danger">Deaktivieren</button>`
+          : '–'}</td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--danger);">Fehler beim Laden.</td></tr>';
+  }
+}
+
+async function erstelleCodes() {
+  const status = document.getElementById('gen-status');
+  status.textContent = 'Wird erstellt…';
+  status.style.color = 'var(--gray-500)';
+  try {
+    const r = await fetch('/api/admin/codes/erstelle', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        anzahl: parseInt(document.getElementById('gen-anzahl').value),
+        prefix: document.getElementById('gen-prefix').value,
+        paket: document.getElementById('gen-paket').value,
+        max_nutzungen: parseInt(document.getElementById('gen-nutzungen').value),
+        notiz: document.getElementById('gen-notiz').value,
+      })
+    });
+    const d = await r.json();
+    if (r.ok) {
+      status.textContent = `✓ ${d.anzahl} Codes erstellt: ${d.codes.slice(0,5).join(', ')}${d.codes.length > 5 ? ' …' : ''}`;
+      status.style.color = 'var(--success)';
+      ladeCodes();
+    } else {
+      status.textContent = 'Fehler: ' + (d.detail || 'Unbekannt');
+      status.style.color = 'var(--danger)';
+    }
+  } catch(e) {
+    status.textContent = 'Netzwerkfehler.';
+    status.style.color = 'var(--danger)';
+  }
+}
+
+async function deaktiviereCode(id) {
+  if (!confirm('Code wirklich deaktivieren?')) return;
+  await fetch('/api/admin/codes/' + id + '/deaktiviere', { method: 'POST', credentials: 'include' });
+  ladeCodes();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async () => {
+  await pruefeAuth();
+  ladeStats();
+  ladeSessions();
+  if (window.location.hash === '#codes') zeigTab('codes');
+})();
+</script>
 </body>
 </html>

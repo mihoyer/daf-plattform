@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Umgebung
+.env
+*.env
+
+# Datenbank
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# Temporäre Dateien
+*.tmp
+*.bak
+qr_codes_testgruppe.pdf
+smtp_test.py
+main_router.py
+
+# macOS
+.DS_Store

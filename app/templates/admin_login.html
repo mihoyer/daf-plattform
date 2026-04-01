@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Login – DaF Sprachdiagnostik</title>
+  <title>Admin Login – DaF/DaZ Sprachdiagnostik</title>
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body style="background:var(--gray-100); min-height:100vh; display:flex; align-items:center; justify-content:center;">
@@ -11,24 +11,50 @@
   <div class="text-center mb-8">
     <div class="brand-icon" style="width:56px; height:56px; font-size:1.5rem; margin:0 auto 1rem;">🎓</div>
     <h2>Admin-Zugang</h2>
-    <p class="text-muted text-sm mt-1">DaF Sprachdiagnostik</p>
+    <p class="text-muted text-sm mt-1">DaF/DaZ Sprachdiagnostik</p>
   </div>
   <div class="card">
-    {% if fehler %}
-    <div class="alert alert-danger mb-4">
+    <div id="fehler-box" style="display:none;" class="alert alert-danger mb-4">
       <span class="alert-icon">⚠️</span>
-      <div>{{ fehler }}</div>
+      <div id="fehler-text">Falsches Passwort.</div>
     </div>
-    {% endif %}
-    <form method="POST" action="/admin/login">
-      <div class="form-group">
-        <label class="form-label">Passwort</label>
-        <input type="password" name="passwort" class="form-input" placeholder="Admin-Passwort" autofocus required>
-      </div>
-      <button type="submit" class="btn btn-primary w-full mt-4">Anmelden →</button>
-    </form>
+    <div class="form-group">
+      <label class="form-label">Passwort</label>
+      <input type="password" id="passwort" class="form-input" placeholder="Admin-Passwort" autofocus>
+    </div>
+    <button onclick="login()" class="btn btn-primary w-full mt-4">Anmelden →</button>
   </div>
   <p class="text-center text-xs text-muted mt-4"><a href="/">← Zurück zur Startseite</a></p>
 </div>
+<script>
+document.getElementById('passwort').addEventListener('keydown', e => {
+  if (e.key === 'Enter') login();
+});
+
+async function login() {
+  const pw = document.getElementById('passwort').value;
+  const fehlerBox = document.getElementById('fehler-box');
+  const fehlerText = document.getElementById('fehler-text');
+  fehlerBox.style.display = 'none';
+  try {
+    const r = await fetch('/api/admin/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passwort: pw })
+    });
+    if (r.ok) {
+      window.location.href = '/admin/dashboard';
+    } else {
+      const d = await r.json();
+      fehlerText.textContent = d.detail || 'Falsches Passwort.';
+      fehlerBox.style.display = 'flex';
+    }
+  } catch(e) {
+    fehlerText.textContent = 'Verbindungsfehler. Bitte erneut versuchen.';
+    fehlerBox.style.display = 'flex';
+  }
+}
+</script>
 </body>
 </html>

@@ -3,24 +3,66 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DaF Sprachdiagnostik – Professionelle Sprachstandsanalyse</title>
+  <title>DaF/DaZ Sprachdiagnostik – Professionelle Sprachstandsanalyse</title>
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
 <nav class="navbar">
   <div class="navbar-inner">
-    <a href="/" class="navbar-brand">
-      <div class="brand-icon">🎓</div>
-      DaF Sprachdiagnostik
-    </a>
-    <div class="navbar-links">
+    <div style="display:flex;flex-direction:column;gap:.05rem;">
+      <a href="/" class="navbar-brand">
+        <div class="brand-icon">🎓</div>
+        DaF/DaZ Sprachdiagnostik
+      </a>
+      <span style="font-size:.65rem;color:#94a3b8;padding-left:.3rem;">Konzept, Didaktik &amp; Entwicklung &copy; Iryna Hoyer</span>
+    </div>
+    <div class="navbar-links" id="nav-links">
       <a href="#module">Module</a>
       <a href="#pakete">Pakete</a>
       <a href="/dsgvo">Datenschutz</a>
       <a href="/admin/login" class="btn btn-outline btn-sm">Admin</a>
     </div>
+    <button class="nav-hamburger" id="nav-toggle" aria-label="Menü" onclick="document.getElementById('nav-links').classList.toggle('open')">
+      <span></span><span></span><span></span>
+    </button>
   </div>
 </nav>
+<style>
+  .nav-hamburger {
+    display: none;
+    flex-direction: column;
+    gap: 5px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+  }
+  .nav-hamburger span {
+    display: block;
+    width: 24px;
+    height: 2px;
+    background: var(--primary);
+    border-radius: 2px;
+  }
+  @media (max-width: 700px) {
+    .nav-hamburger { display: flex; }
+    .navbar-links {
+      display: none !important;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      flex-direction: column !important;
+      padding: 1rem 1.5rem;
+      gap: 1rem !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,.1);
+      border-top: 1px solid var(--gray-200);
+      z-index: 200;
+    }
+    .navbar-links.open { display: flex !important; }
+  }
+</style>
 
 <section class="hero">
   <div class="container text-center">
@@ -31,6 +73,10 @@
     <p style="max-width:600px; margin: 1rem auto 2rem;">
       Anonyme, DSGVO-konforme Sprachstandsanalyse nach CEFR-Rahmen (A1–C2) –
       mit 6 Kompetenzbereichen, adaptiver Testlogik und detailliertem Einstufungsbericht.
+    </p>
+    <p style="max-width:600px; margin: 0 auto 2rem; font-size:.85rem; color:rgba(255,255,255,.65);">
+      Konzept, Didaktik &amp; Entwicklung: <strong style="color:rgba(255,255,255,.9);">Iryna Hoyer</strong>
+      &nbsp;&middot;&nbsp; &copy; 2025 Iryna Hoyer. Alle Rechte vorbehalten.
     </p>
     <div class="flex gap-3 justify-center flex-wrap">
       <span class="btn btn-primary btn-lg" style="opacity:.4; cursor:not-allowed;" title="Zugang nur über persönlichen QR-Code">Jetzt starten</span>
@@ -106,6 +152,22 @@
       <h2>Pakete &amp; Preise</h2>
       <p class="text-muted mt-2">Wähle das passende Paket für deine Anforderungen.</p>
     </div>
+
+    <!-- Pilotphase-Banner -->
+    <div style="background:#fefce8; border:1.5px solid #fde047; border-radius:12px; padding:1.25rem 1.5rem; margin-bottom:2rem; display:flex; gap:1rem; align-items:flex-start;">
+      <span style="font-size:1.5rem; flex-shrink:0;">&#x1F6A7;</span>
+      <div>
+        <p style="font-weight:700; color:#854d0e; margin-bottom:.35rem;">Plattform befindet sich in der Pilotphase</p>
+        <p style="font-size:.9rem; color:#713f12; margin:0;">Die Buchung ist aktuell noch nicht öffentlich verfügbar. Bei Interesse an einer Teilnahme an der Pilotphase wenden Sie sich bitte direkt an: <span id="email-pilot"></span></p>
+      </div>
+    </div>
+    <script>
+      (function(){
+        var u='support',d='mikehoyer.de';
+        var el=document.getElementById('email-pilot');
+        el.innerHTML='<a href="mailto:'+u+'@'+d+'" style="color:#92400e; font-weight:600;">'+u+'&#64;'+d+'</a>';
+      })();
+    </script>
     <div class="paket-grid">
       <div class="paket-card">
         <div class="text-muted text-sm font-bold mb-2">BASIS</div>
@@ -117,10 +179,9 @@
           <li>CEFR-Einstufung</li>
           <li>PDF-Bericht</li>
         </ul>
-        <span class="btn btn-outline w-full mt-6" style="opacity:.4; cursor:not-allowed;">Auswählen</span>
+        <span class="btn btn-outline w-full mt-6" style="opacity:.35; cursor:not-allowed; pointer-events:none; filter:grayscale(1);">Auswählen</span>
       </div>
-      <div class="paket-card featured">
-        <div class="paket-badge">Empfohlen</div>
+      <div class="paket-card">
         <div class="text-muted text-sm font-bold mb-2">STANDARD</div>
         <div class="paket-preis">10 CHF <span>/ Analyse</span></div>
         <p class="text-sm text-muted mb-4">Umfassende Analyse aller Kernkompetenzen.</p>
@@ -132,7 +193,7 @@
           <li>Detaillierter Skill-Breakdown</li>
           <li>PDF + JSON Export</li>
         </ul>
-        <span class="btn btn-primary w-full mt-6" style="opacity:.4; cursor:not-allowed;">Auswählen</span>
+        <span class="btn btn-outline w-full mt-6" style="opacity:.35; cursor:not-allowed; pointer-events:none; filter:grayscale(1);">Auswählen</span>
       </div>
       <div class="paket-card">
         <div class="text-muted text-sm font-bold mb-2">PREMIUM</div>
@@ -146,7 +207,7 @@
           <li>Adaptive Zusatzfragen</li>
           <li>PDF + JSON Export</li>
         </ul>
-        <span class="btn btn-dark w-full mt-6" style="opacity:.4; cursor:not-allowed;">Auswählen</span>
+        <span class="btn btn-outline w-full mt-6" style="opacity:.35; cursor:not-allowed; pointer-events:none; filter:grayscale(1);">Auswählen</span>
       </div>
     </div>
     <p class="text-center text-sm text-muted mt-6">Alle Preise inkl. MwSt. · Zahlung per Kreditkarte (Stripe) · CHF und EUR</p>
@@ -176,8 +237,9 @@
 <footer class="footer">
   <div class="footer-inner">
     <div>
-      <strong style="color:white;">DaF Sprachdiagnostik</strong><br>
-      <span style="font-size:.85rem;">Professionelle Sprachstandsanalyse</span>
+      <strong style="color:white;">DaF/DaZ Sprachdiagnostik</strong><br>
+      <span style="font-size:.85rem;">Professionelle Sprachstandsanalyse</span><br>
+      <span style="font-size:.8rem; color:rgba(255,255,255,.55);">Konzept, Didaktik &amp; Entwicklung &copy; Iryna Hoyer</span>
     </div>
     <div class="flex gap-4 text-sm">
       <a href="/dsgvo">Datenschutz</a>

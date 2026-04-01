@@ -2,27 +2,56 @@
 DaF Sprachdiagnostik-Plattform – Hauptanwendung
 FastAPI + PostgreSQL + Stripe + OpenAI
 """
+import asyncio
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import select, update
 
 from app.config import settings
-from app.models.database import init_db
+from app.models.database import AsyncSessionLocal, SessionStatus, TestSession, init_db
 from app.routers.main_router import router as main_router
 from app.routers.admin_router import router as admin_router
 from app.routers.export_router import router as export_router
 from app.routers.kandidaten_router import router as kandidaten_router
 
 
+async def _timeout_worker():
+    """Markiert alle laufenden Sessions als 'abgelaufen', wenn laeuft_ab_am überschritten."""
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                now = datetime.now(timezone.utc)
+                stmt = (
+                    update(TestSession)
+                    .where(
+                        TestSession.status == SessionStatus.laufend,
+                        TestSession.laeuft_ab_am != None,
+                        TestSession.laeuft_ab_am < now,
+                    )
+                    .values(status=SessionStatus.abgelaufen)
+                )
+                result = await db.execute(stmt)
+                if result.rowcount:
+                    print(f"[Timeout] {result.rowcount} Session(s) als abgelaufen markiert.")
+                await db.commit()
+        except Exception as e:
+            print(f"[Timeout] Fehler: {e}")
+        await asyncio.sleep(900)  # alle 15 Minuten prüfen
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    task = asyncio.create_task(_timeout_worker())
     yield
+    task.cancel()
 
 
 app = FastAPI(
@@ -113,7 +142,9 @@ async def ergebnis_seite(request: Request, token: str):
 
 @app.get("/dsgvo", response_class=HTMLResponse)
 async def dsgvo(request: Request):
-    return templates.TemplateResponse("dsgvo.html", {"request": request})
+    from datetime import datetime
+    datum = datetime.now().strftime("%d.%m.%Y")
+    return templates.TemplateResponse("dsgvo.html", {"request": request, "datum": datum})
 
 
 @app.get("/admin", response_class=HTMLResponse)

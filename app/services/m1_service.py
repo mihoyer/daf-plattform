@@ -159,7 +159,8 @@ async def generiere_eine_frage(
     item_id: int = 1,
 ) -> dict:
     """
-    Generiert genau eine MC-Frage für das angegebene Niveau.
+    Generiert genau eine Lückentext-Frage für das angegebene Niveau.
+    Der Lernende gibt die Antwort als Freitext ein (kein Multiple-Choice).
     Authentizitätsprinzip: Satz klingt wie aus einem echten Text.
     """
     # Grammatikfokus aus dem niveau-spezifischen Pool
@@ -192,7 +193,7 @@ async def generiere_eine_frage(
         beispiele = " | ".join(bereits_verwendet[-4:])
         vermeidungs_hinweis = f'\nVERMEIDE Fragen, die diesen ähneln: {beispiele}'
 
-    prompt = f"""Du bist DaF-Prüfungsautor mit Erfahrung beim Goethe-Institut. Erstelle EINE Multiple-Choice-Lückensatz-Aufgabe.
+    prompt = f"""Du bist DaF-Prüfungsautor mit Erfahrung beim Goethe-Institut. Erstelle EINE Lückentext-Aufgabe (Freitexteingabe, kein Multiple-Choice).
 
 NIVEAU: {niveau} (CEFR)
 GRAMMATIK-FOKUS: {fokus}
@@ -205,21 +206,21 @@ VERBOTE FÜR DIESES NIVEAU:
 
 QUALITÄTSREGELN (alle einhalten):
 1. Der Satz mit der richtigen Antwort muss so klingen, wie ihn ein Muttersprachler tatsächlich schreiben würde.
-2. Genau eine Lücke (_____), genau 4 Optionen, genau eine richtige Antwort.
-3. Die 3 falschen Optionen sind typische Fehler auf diesem Niveau – nicht zufällige Wörter.
-4. Jede Option ist kurz (1–4 Wörter). Keine Optionen, die sich nur durch Groß-/Kleinschreibung unterscheiden.
-5. Die richtige Antwort ist grammatisch und semantisch EINDEUTIG korrekt – keine Grenzfälle.
-6. Kein Satz, der mehrere Deutungen zulässt.
+2. PFLICHT: Im Feld "frage" MUSS exakt die Zeichenkette _____ (fünf Unterstriche) als Lücke vorkommen. Ohne _____ ist die Aufgabe ungültig.
+3. Die Lücke testet gezielt den angegebenen Grammatikfokus.
+4. Die korrekte Antwort ist eine einzelne Wortform (1–4 Wörter), grammatisch und semantisch EINDEUTIG korrekt.
+5. Kein Satz, der mehrere Deutungen oder mehrere mögliche Antworten zulässt.
+6. Die Erklärung nennt die Grammatikregel präzise (1–2 Sätze).
 {hilfs_hinweis}
+
+WICHTIG: Das Feld "frage" MUSS _____ enthalten. Beispiel: "Er ist _____ nach Hause gegangen."
 
 Antworte NUR mit diesem JSON (kein Text davor oder danach):
 {{
   "id": {item_id},
-  "frage": "Vollständiger Satz mit _____ als Lücke",
-  "optionen": ["Option A", "Option B", "Option C", "Option D"],
-  "korrekt": 0,
-  "korrekte_antwort_text": "exakt derselbe Text wie optionen[korrekt]",
-  "erklaerung": "Warum diese Option korrekt ist (1–2 präzise Sätze, Regel benennen)",
+  "frage": "Vollständiger Satz mit _____ als Lücke – MUSS _____ enthalten!",
+  "korrekte_antwort_text": "Die einzig korrekte Wortform (z.B. 'hatte', 'dem', 'weil')",
+  "erklaerung": "Warum diese Form korrekt ist (1–2 präzise Sätze, Grammatikregel nennen)",
   "niveau": "{niveau}",
   "thema": "Thema des Satzes"
 }}"""
@@ -246,28 +247,24 @@ Antworte NUR mit diesem JSON (kein Text davor oder danach):
             )
             data = json.loads(response.choices[0].message.content)
 
-            if not all(k in data for k in ("frage", "optionen", "korrekt")):
+            if not all(k in data for k in ("frage", "korrekte_antwort_text")):
                 continue
 
+            # Sicherheitscheck: Lücke muss im Satz vorhanden sein
+            if "_____" not in data.get("frage", ""):
+                print(f"[M1] Kein _____ im Satz (Versuch {versuch+1}), neu generieren: {data.get('frage', '')[:80]}")
+                continue
+
+            # Kompatibilitäts-Felder für Backend (erwartet optionen/korrekt)
+            korrekte_antwort = data.get("korrekte_antwort_text", "").strip()
+            data["optionen"] = [korrekte_antwort, "–", "–", "–"]
+            data["korrekt"] = 0
             data["id"] = item_id
             data["niveau"] = niveau
             optionen = data.get("optionen", [])
             korrekt_idx = data.get("korrekt", 0)
-            korrekte_antwort_text = data.get("korrekte_antwort_text", "")
-
-            # Index-Text-Konsistenz prüfen und ggf. korrigieren
-            if korrekte_antwort_text and 0 <= korrekt_idx < len(optionen):
-                if optionen[korrekt_idx].strip() != korrekte_antwort_text.strip():
-                    try:
-                        echter_idx = next(
-                            i for i, opt in enumerate(optionen)
-                            if opt.strip() == korrekte_antwort_text.strip()
-                        )
-                        data["korrekt"] = echter_idx
-                        korrekt_idx = echter_idx
-                        print(f"[M1] Index-Korrektur: korrekt→{echter_idx} ('{korrekte_antwort_text}')")
-                    except StopIteration:
-                        pass
+            # Index-Text-Konsistenz: bei Freitext immer Index 0
+            data["korrekt"] = 0
 
             # Grammatische Validierung
             validiert = await _validiere_frage(data)
@@ -377,14 +374,21 @@ async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
             "korrekt": ist_korrekt,
         })
 
+        korrekt_text = frage.get("korrekte_antwort_text") or (
+            frage.get("optionen", [])[frage.get("korrekt", 0)]
+            if frage.get("optionen") else "–"
+        )
         details.append({
             "id": frage["id"],
             "frage": frage["frage"],
             "optionen": frage.get("optionen", []),
             "gewaehlt": gewaehlt,
-            "gewaehlt_text": frage.get("optionen", [])[gewaehlt] if 0 <= gewaehlt < len(frage.get("optionen", [])) else "–",
+            "gewaehlt_text": (frage.get("optionen", [])[gewaehlt]
+                               if 0 <= gewaehlt < len(frage.get("optionen", []))
+                               else "–"),
             "korrekt": frage.get("korrekt"),
-            "korrekt_text": frage.get("optionen", [])[frage.get("korrekt", 0)] if frage.get("korrekt") is not None else "–",
+            "korrekt_text": korrekt_text,
+            "korrekte_antwort_text": korrekt_text,
             "ist_korrekt": ist_korrekt,
             "erklaerung": frage.get("erklaerung", ""),
             "niveau": frage.get("niveau", "B1"),
@@ -392,7 +396,6 @@ async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
         })
 
     prozent = (korrekt_count / total * 100) if total > 0 else 0
-    score = round(prozent, 1)
 
     adaptives_niveau = schaetze_niveau(antworten_verlauf)
 
@@ -411,6 +414,9 @@ async def werte_aus(alle_fragen: list[dict], antworten: dict[str, int]) -> dict:
     prozent_idx = NIVEAUS.index(prozent_cefr)
     final_idx = round((adaptiv_idx + prozent_idx) / 2)
     final_cefr = NIVEAUS[final_idx]
+
+    # Relativer Score (0-100) wird im main_router zu absolutem Score umgerechnet
+    score = round(prozent, 1)
 
     return {
         "score": score,
@@ -443,23 +449,23 @@ async def _validiere_frage(item: dict) -> Optional[dict]:
     optionen_text = "\n".join(f"{i}. {opt}" for i, opt in enumerate(optionen))
     korrekte_option = optionen[korrekt_idx]
 
-    val_prompt = f"""Du bist Deutschlehrer und Grammatikexperte. Prüfe diese DaF-Aufgabe (Niveau {niveau}).
+    val_prompt = f"""Du bist Deutschlehrer und Grammatikexperte. Prüfe diese DaF-Lückentext-Aufgabe (Niveau {niveau}).
 
 Lückensatz: {frage}
-Optionen:
-{optionen_text}
-Als korrekt markiert: {korrekt_idx}. "{korrekte_option}"
+Korrekte Antwort: "{korrekte_option}"
 
-Beantworte drei Fragen:
-1. Ist "{korrekte_option}" grammatisch und semantisch die EINZIG richtige Antwort?
+Beantworte VIER Fragen:
+1. Ist "{korrekte_option}" grammatisch und semantisch die EINZIG richtige Antwort für diese Lücke?
 2. Klingt der vollständige Satz mit "{korrekte_option}" natürlich (wie ein Muttersprachler ihn schreiben würde)?
-3. Sind alle anderen Optionen eindeutig falsch?
+3. Gibt es keine andere plausible Antwort, die ebenfalls korrekt wäre?
+4. Ist die Lücke sinnvoll gesetzt? Prüfe: Steht nach der Lücke kein Wort, das zur korrekten Antwort gehört oder sie verdoppelt (z.B. Lücke=\"der\" gefolgt von \"der\", oder Lücke=\"Eskalation\" gefolgt von \"der\" wäre ok). Die Lücke darf nicht redundant oder sinnlos wirken.
 
-Antworte mit JSON:
+ANTWORTE mit JSON:
 {{
   "korrekt": true/false,
   "natuerlich": true/false,
-  "richtiger_index": {korrekt_idx},
+  "luecke_sinnvoll": true/false,
+  "richtiger_index": 0,
   "richtige_antwort": "{korrekte_option}",
   "erklaerung": "Kurze Begründung (Grammatikregel nennen)",
   "frage_korrekt": true/false
@@ -481,33 +487,29 @@ Antworte mit JSON:
         )
         val = json.loads(response.choices[0].message.content)
 
-        # Frage fehlerhaft oder unnatürlich → verwerfen
+        # Frage fehlerhaft, unnatürlich oder Lücke sinnlos → verwerfen
         if not val.get("frage_korrekt", True):
             print(f"[M1] Frage verworfen (fehlerhaft): {frage[:60]}")
             return None
         if not val.get("natuerlich", True):
             print(f"[M1] Frage verworfen (unnatürlich): {frage[:60]}")
             return None
+        if not val.get("luecke_sinnvoll", True):
+            print(f"[M1] Frage verworfen (Lücke sinnlos/redundant): {frage[:60]}")
+            return None
 
-        # Falscher Index → korrigieren
+        # Bei Freitext: korrekte Antwort ggf. aus Validierung übernehmen
         if not val.get("korrekt", True):
-            richtiger_idx = val.get("richtiger_index", korrekt_idx)
-            richtige_antwort = val.get("richtige_antwort", "")
+            richtige_antwort = val.get("richtige_antwort", "").strip()
             if richtige_antwort:
-                try:
-                    richtiger_idx = next(
-                        i for i, opt in enumerate(optionen)
-                        if opt.strip() == richtige_antwort.strip()
-                    )
-                except StopIteration:
-                    pass
-            if 0 <= richtiger_idx < len(optionen):
-                print(f"[M1] Validierung korrigiert: {korrekt_idx}→{richtiger_idx} ('{optionen[richtiger_idx]}')")
+                print(f"[M1] Validierung korrigiert Antwort: '{item.get('korrekte_antwort_text')}' → '{richtige_antwort}'")
                 item = dict(item)
-                item["korrekt"] = richtiger_idx
+                item["korrekte_antwort_text"] = richtige_antwort
+                item["optionen"] = [richtige_antwort, "–", "–", "–"]
+                item["korrekt"] = 0
                 item["erklaerung"] = val.get("erklaerung", item.get("erklaerung", ""))
             else:
-                print(f"[M1] Frage verworfen (kein gültiger Index): {frage[:60]}")
+                print(f"[M1] Frage verworfen (keine gültige Korrektur): {frage[:60]}")
                 return None
         else:
             if val.get("erklaerung"):
@@ -522,16 +524,12 @@ Antworte mit JSON:
 
 
 def _mische_optionen(item: dict) -> dict:
-    """Mischt die Antwortoptionen zufällig und passt den korrekt-Index an."""
+    """Bei Freitext-Aufgaben: kein Mischen nötig, korrekte Antwort bleibt bei Index 0."""
     item = dict(item)
-    optionen = list(item.get("optionen", []))
-    korrekt_idx = item.get("korrekt", 0)
-    if 0 <= korrekt_idx < len(optionen):
-        korrekte_antwort = optionen[korrekt_idx]
-        random.shuffle(optionen)
-        item["optionen"] = optionen
-        item["korrekt"] = optionen.index(korrekte_antwort)
-        item["korrekte_antwort_text"] = korrekte_antwort
+    # Sicherstellen dass korrekte_antwort_text gesetzt ist
+    if not item.get("korrekte_antwort_text") and item.get("optionen"):
+        item["korrekte_antwort_text"] = item["optionen"][0]
+    item["korrekt"] = 0
     return item
 
 
